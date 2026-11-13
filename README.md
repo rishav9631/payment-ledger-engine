@@ -22,10 +22,10 @@
 
 ![Dynamic Cluster Scaling & Load Balancer](docs/images/workbench-cluster-scaling.jpg)
 
-### 2. Real-Time Ingress & Event Stream Tracker
-*Live gateway transaction feeds, p95/p99 latency percentiles, and idempotent replay detection:*
+### 2. Queue-First Load Ingress & Event Pipeline
+*Visualizing high-capacity queue ingress (202 Accepted), double-entry settlement rates, strict 60s expiration gates, and real-time Kafka buffer absorption:*
 
-![Dashboard Overview & Live Stream](docs/images/dashboard-overview.png)
+![Queue-First Ingress Workbench](docs/images/queue-ingress-workbench.png)
 
 ---
 
@@ -34,39 +34,39 @@
 ```mermaid
 flowchart TD
     subgraph Ingress ["1. Ingress & Gatekeeping"]
-        Client([Payment Client / Load Tester]) -->|POST /api/v1/transfers| NGINX[NGINX API Gateway :8088]
-        NGINX -->|X-Request-Timestamp: $msec<br/>High Burst Zone 5000 r/s| IngestNodes[Ingestion Nodes :8081-:8085<br/>Dynamic Cluster Pool]
-        IngestNodes -->|Checkpoint A<br/>Stale >60s?| Reject408[HTTP 408 Request Timeout]
+        Client(["Payment Client / Load Tester"]) -->|"POST /api/v1/transfers"| NGINX["NGINX API Gateway :8088"]
+        NGINX -->|"X-Request-Timestamp (msec)<br/>High Burst Zone: 5,000 r/s"| IngestNodes["Ingestion Nodes :8081-:8085<br/>Dynamic Cluster Pool"]
+        IngestNodes -->|"Checkpoint A<br/>Stale &gt; 60s?"| Reject408["HTTP 408 Request Timeout"]
     end
 
     subgraph KafkaBuffer ["2. Queue-First Buffer & Shock Absorber"]
-        IngestNodes -->|acks=all, Synchronous Write| TopicRequests[Kafka Topic: payment-requests<br/>6 Partitions | TTL 120s]
-        IngestNodes -->|Immediate Response <4ms| Resp202[HTTP 202 Accepted]
+        IngestNodes -->|"acks=all, Synchronous Write"| TopicRequests["Kafka Topic: payment-requests<br/>6 Partitions • TTL 120s"]
+        IngestNodes -->|"Immediate Response &lt; 4ms"| Resp202["HTTP 202 Accepted"]
     end
 
     subgraph Workers ["3. Ledger Execution & Expiration Gate"]
-        TopicRequests -->|Pull messages| ConsumerPool[Ledger Settlement Workers<br/>group: ledger-execution]
-        ConsumerPool -->|Checkpoint B<br/>now > expires_at?| ExpiredGate[Terminal State: EXPIRED]
-        ExpiredGate -->|Audit Event| TopicExpired[Kafka: ledger.transfers.expired]
-        ConsumerPool -->|Valid now <= expires_at| SettleTx[Double-Entry Settlement<br/>DEBIT + CREDIT Atomic Write]
+        TopicRequests -->|"Pull messages"| ConsumerPool["Ledger Settlement Workers<br/>group: ledger-execution"]
+        ConsumerPool -->|"Checkpoint B<br/>now &gt; expires_at?"| ExpiredGate["Terminal State: EXPIRED"]
+        ExpiredGate -->|"Audit Event"| TopicExpired["Kafka: ledger.transfers.expired"]
+        ConsumerPool -->|"Valid: now &lt;= expires_at"| SettleTx["Double-Entry Settlement<br/>DEBIT + CREDIT Atomic Write"]
     end
 
     subgraph Storage ["4. Consistency & Storage Layer"]
-        SettleTx -->|Redisson Lock| Redis[(Redis Cluster Cache :6379<br/>Distributed Locks & Idempotency)]
-        SettleTx -->|ACID Commit| Postgres[(PostgreSQL 16 :5432<br/>Immutable LedgerEntries)]
-        SettleTx -->|Outbox Pattern| OutboxTable[(outbox_events Table)]
+        SettleTx -->|"Redisson Lock"| Redis[("Redis Cluster Cache :6379<br/>Distributed Locks & Idempotency")]
+        SettleTx -->|"ACID Commit"| Postgres[("PostgreSQL 16 :5432<br/>Immutable LedgerEntries")]
+        SettleTx -->|"Outbox Pattern"| OutboxTable[("outbox_events Table")]
     end
 
     subgraph Streaming ["5. Event Streaming & Auditing"]
-        OutboxTable --> TopicCompleted[Kafka: ledger.transfers.completed]
-        OutboxTable --> TopicOutbox[Kafka: ledger.outbox.events]
-        ConsumerPool -->|Poison Payload| TopicDLQ[Kafka DLQ: payment-requests-dlq]
+        OutboxTable --> TopicCompleted["Kafka: ledger.transfers.completed"]
+        OutboxTable --> TopicOutbox["Kafka: ledger.outbox.events"]
+        ConsumerPool -->|"Poison Payload"| TopicDLQ["Kafka DLQ: payment-requests-dlq"]
     end
 
     subgraph Observability ["6. Telemetry & Monitoring"]
-        IngestNodes -->|/actuator/prometheus| Prom[Prometheus :9090]
-        Prom --> Grafana[Grafana Dashboards :3005<br/>SLA, SOS, Ledger, Anomaly]
-        TopicRequests --> Kafbat[Kafbat UI :8089<br/>Topics, Offsets, Lag, Brokers]
+        IngestNodes -->|"/actuator/prometheus"| Prom["Prometheus :9090"]
+        Prom --> Grafana["Grafana Dashboards :3005<br/>SLA, SOS, Ledger, Anomaly"]
+        TopicRequests --> Kafbat["Kafbat UI :8089<br/>Topics, Offsets, Lag, Brokers"]
     end
 ```
 
@@ -102,15 +102,25 @@ Payment UIs typically display a "Processing" state for at most 60 seconds. Trans
 ## 📊 Live Observability & Telemetry
 
 ### 1. Grafana Pre-Provisioned Dashboards (`http://localhost:3005`)
-- **Main Ledger Engine**: Real-time TPS, p95/p99 latency percentiles, JVM G1 Eden/Old Gen usage, Kafka record throughput.
+
+- **Main Double-Entry Ledger Engine**: Real-time TPS, p95/p99 latency percentiles, JVM G1 Eden/Old Gen usage, Kafka record throughput.
 - **SLA / SLO Dashboard**: 99.9% Availability SLA Gauge, Error Budget Burndown, Latency budget tracking.
 - **SOS War-Room**: Active firing alerts, 429 throttling spikes, 5xx rate tracking, outbox backlog counters.
 - **Anomaly Detection**: Latency moving-average divergence, $\Delta$ RPS acceleration spikes, heap exhaustion trajectory.
 
+![Grafana Main Ledger Engine Dashboard](docs/images/grafana-ledger-dashboard.png)
+
+*SLA / SLO Compliance & Error Budget Tracking:*
+
+![Grafana SLA SLO Dashboard](docs/images/grafana-sla-dashboard.png)
+
 ### 2. Kafbat UI (`http://localhost:8089`)
+
 - Inspect KRaft single-node broker health (ZooKeeper-less mode).
-- Explore topics: `payment-requests`, `ledger.transfers.completed`, `ledger.outbox.events`, `payment-requests-dlq`.
+- Explore topics: `payment-requests` (6 partitions), `ledger.transfers.completed`, `ledger.outbox.events`, `payment-requests-dlq`.
 - Live consumer group lag tracking (`ledger-execution-worker-group`, `ledger-audit-consumer-group`, `outbox-cdc-relay-group`).
+
+![Kafbat UI Topic Streams & Partitions](docs/images/kafbat-topics.png)
 
 ---
 

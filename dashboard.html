@@ -922,7 +922,8 @@
 
         const total = data.total_requests || 0;
         const settled = data.settled_completed || data.successful_requests || 0;
-        const rate = total > 0 ? ((settled / total) * 100).toFixed(1) : 100;
+        const base = Math.max(total, data.ingested_202 || 0);
+        const rate = base > 0 ? Math.min(100, ((settled / base) * 100)).toFixed(1) : 100;
         document.getElementById('kpiSuccessRate').innerText = rate + '%';
 
         if (data.running !== isRunning) {
