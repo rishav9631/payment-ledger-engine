@@ -11,6 +11,7 @@ Features:
 """
 
 import http.server
+import http.client
 import socketserver
 import json
 import urllib.request
@@ -23,7 +24,30 @@ import socket
 import os
 import random
 import subprocess
+import selectors
 from collections import deque
+
+# ── Windows Python 3.11 Selector Patch ──────────────────────────────────────
+# Prevents "ValueError: Invalid file descriptor: -1" when Kafka broker closes sockets
+orig_select_unregister = selectors.SelectSelector.unregister
+def safe_select_unregister(self, fileobj):
+    try:
+        return orig_select_unregister(self, fileobj)
+    except Exception:
+        target_fd = None
+        target_key = None
+        for fd, key in list(self._fd_to_key.items()):
+            if key.fileobj == fileobj or key.fileobj is fileobj or key.fd == fileobj:
+                target_fd = fd
+                target_key = key
+                break
+        if target_key:
+            self._fd_to_key.pop(target_fd, None)
+            self._readers.discard(target_key.fd)
+            self._writers.discard(target_key.fd)
+            return target_key
+        return None
+selectors.SelectSelector.unregister = safe_select_unregister
 
 PORT = 5000
 CONTROLLER_PORT = 8080
@@ -32,6 +56,7 @@ NGINX_CONF_PATH = os.path.join(STATIC_DIR, "nginx", "nginx.conf")
 
 state_lock = threading.Lock()
 stop_event = threading.Event()
+generator_stop_event = threading.Event()
 
 # ---------------------------------------------------------------------------
 # Multi-threaded HTTP Server for concurrency without WinError 10053
@@ -88,7 +113,7 @@ def produce_kafka_event(topic, key, value, synchronous=False):
 def start_kafka_consumers():
     # ── Standard Audit & Notification Consumers ──
     def run_consumer(group_id, topics):
-        while not stop_event.is_set():
+        while True:
             try:
                 from kafka import KafkaConsumer
                 consumer = KafkaConsumer(
@@ -101,7 +126,7 @@ def start_kafka_consumers():
                     consumer_timeout_ms=2000
                 )
                 print(f"[*] Kafka Consumer Group active: {group_id} listening to {topics}")
-                while not stop_event.is_set():
+                while True:
                     msg_batch = consumer.poll(timeout_ms=1500)
                     if msg_batch:
                         consumer.commit()
@@ -111,7 +136,7 @@ def start_kafka_consumers():
 
     # ── Core Checkpoint B: High-Throughput Parallel Settlement Workers ──
     def run_ledger_settlement_worker(worker_id):
-        while not stop_event.is_set():
+        while True:
             consumer = None
             try:
                 from kafka import KafkaConsumer
@@ -126,7 +151,7 @@ def start_kafka_consumers():
                     consumer_timeout_ms=1000
                 )
                 print(f"[*] Kafka Settlement Worker-{worker_id} active on ['payment-requests']")
-                while not stop_event.is_set():
+                while True:
                     msg_batch = consumer.poll(timeout_ms=400, max_records=500)
                     if not msg_batch:
                         continue
@@ -177,7 +202,8 @@ def start_kafka_consumers():
                         consumer.commit()
                     except Exception:
                         pass
-            except Exception:
+            except Exception as ex:
+                print(f"[!] Settlement Worker-{worker_id} notice: {ex}")
                 time.sleep(1)
             finally:
                 if consumer:
@@ -582,6 +608,7 @@ http {{
     # ── Dynamic Cluster Upstream (Round-Robin) ───────────────────
     upstream ledger_backend {{
 {upstream_servers}
+        keepalive 64;
     }}
 
     server {{
@@ -606,6 +633,7 @@ http {{
 
             proxy_pass         http://ledger_backend;
             proxy_http_version 1.1;
+            proxy_set_header   Connection          "";
             proxy_set_header   Host                $host;
             proxy_set_header   X-Real-IP           $remote_addr;
             proxy_set_header   X-Forwarded-For     $proxy_add_x_forwarded_for;
@@ -745,9 +773,21 @@ def start_controller():
 
 
 # ---------------------------------------------------------------------------
-# High-Throughput Load Test Generator Thread Pool
+# High-Throughput Load Test Generator Thread Pool & Keep-Alive HTTP Connection
 # ---------------------------------------------------------------------------
 executor_pool = None
+_thread_http_client = threading.local()
+
+def get_thread_http_conn(target_url):
+    parsed = urllib.parse.urlparse(target_url)
+    host = parsed.hostname or "127.0.0.1"
+    port = parsed.port or 8088
+    path = parsed.path or "/api/v1/transfers"
+    conn = getattr(_thread_http_client, "conn", None)
+    if conn is None:
+        conn = http.client.HTTPConnection(host, port, timeout=1.0)
+        _thread_http_client.conn = conn
+    return conn, path
 
 def run_single_request(target_url, replay_key=None):
     key = replay_key or str(uuid.uuid4())
@@ -761,38 +801,58 @@ def run_single_request(target_url, replay_key=None):
         "client_timestamp": time.time()
     }).encode("utf-8")
 
-    req = urllib.request.Request(
-        target_url,
-        data=payload,
-        headers={
-            "Content-Type": "application/json",
-            "Idempotency-Key": key,
-            "User-Agent": "LedgerLoadTester/2.0"
-        },
-        method="POST"
-    )
-
     t0 = time.time()
     status_code = 0
     resp_body = ""
     served_by = "UNKNOWN"
     is_replay = replay_key is not None
 
+    conn, path = get_thread_http_conn(target_url)
     try:
-        with urllib.request.urlopen(req, timeout=5.0) as resp:
-            latency_ms = (time.time() - t0) * 1000.0
-            status_code = resp.status
-            served_by = resp.headers.get("X-Served-By") or resp.headers.get("X-Upstream-Addr") or "NODE"
-            resp_body = resp.read(256).decode("utf-8", errors="ignore")
-    except urllib.error.HTTPError as e:
+        conn.request("POST", path, body=payload, headers={
+            "Content-Type": "application/json",
+            "Idempotency-Key": key,
+            "User-Agent": "LedgerLoadTester/2.0",
+            "Connection": "keep-alive"
+        })
+        resp = conn.getresponse()
         latency_ms = (time.time() - t0) * 1000.0
-        status_code = e.code
-        served_by = e.headers.get("X-Served-By") or "NGINX"
-        resp_body = e.read(256).decode("utf-8", errors="ignore")
+        status_code = resp.status
+        served_by = resp.getheader("X-Served-By") or resp.getheader("X-Upstream-Addr") or "NODE"
+        resp_body_bytes = resp.read()
+        resp_body = resp_body_bytes[:256].decode("utf-8", errors="ignore")
     except Exception as e:
-        latency_ms = (time.time() - t0) * 1000.0
-        status_code = 599
-        resp_body = str(e)
+        # Transparent reset and retry once on socket drop
+        try:
+            conn.close()
+        except Exception:
+            pass
+        _thread_http_client.conn = None
+        try:
+            t0 = time.time()
+            conn2, path2 = get_thread_http_conn(target_url)
+            conn2.request("POST", path2, body=payload, headers={
+                "Content-Type": "application/json",
+                "Idempotency-Key": key,
+                "User-Agent": "LedgerLoadTester/2.0",
+                "Connection": "keep-alive"
+            })
+            resp2 = conn2.getresponse()
+            latency_ms = (time.time() - t0) * 1000.0
+            status_code = resp2.status
+            served_by = resp2.getheader("X-Served-By") or resp2.getheader("X-Upstream-Addr") or "NODE"
+            resp_body_bytes = resp2.read()
+            resp_body = resp_body_bytes[:256].decode("utf-8", errors="ignore")
+        except Exception as e2:
+            latency_ms = (time.time() - t0) * 1000.0
+            status_code = 599
+            resp_body = str(e2)
+            try:
+                if getattr(_thread_http_client, "conn", None):
+                    _thread_http_client.conn.close()
+            except Exception:
+                pass
+            _thread_http_client.conn = None
 
     with state_lock:
         test_state["total_requests"] += 1
@@ -831,14 +891,15 @@ def run_single_request(target_url, replay_key=None):
 
 def load_generator_worker(target_url, target_rps, replay_pct):
     import concurrent.futures
-    pool = concurrent.futures.ThreadPoolExecutor(max_workers=80)
+    # Concurrency formula: workers = target_rps * avg_latency (100 * 0.01s = 1). 20 workers easily handles up to 2,000 RPS without OS port collision.
+    pool = concurrent.futures.ThreadPoolExecutor(max_workers=20)
     batch_size = max(1, target_rps // 20)
     interval = batch_size / max(target_rps, 1)
 
-    while not stop_event.is_set():
+    while not generator_stop_event.is_set():
         t_start = time.time()
         for _ in range(batch_size):
-            if stop_event.is_set():
+            if generator_stop_event.is_set():
                 break
             replay_key = None
             with state_lock:
@@ -854,7 +915,7 @@ def load_generator_worker(target_url, target_rps, replay_pct):
 
 def metrics_collector_worker():
     last_count = 0
-    while not stop_event.is_set():
+    while not generator_stop_event.is_set():
         time.sleep(1.0)
         with state_lock:
             current_total = test_state["total_requests"]
@@ -920,9 +981,13 @@ class DashboardRequestHandler(http.server.SimpleHTTPRequestHandler):
                 p99 = round(lats[int(len(lats) * 0.99)], 1) if lats else 0
                 avg = round(sum(lats) / len(lats), 1) if lats else 0
 
-                ingested = prom_metrics["requests_202"]
-                settled = prom_metrics["transfers_completed"]
-                expired = prom_metrics["transfers_expired"]
+                base_ing = test_state.get("base_ingested", 0)
+                base_set = test_state.get("base_settled", 0)
+                base_exp = test_state.get("base_expired", 0)
+
+                ingested = max(0, prom_metrics["requests_202"] - base_ing)
+                settled = max(0, prom_metrics["transfers_completed"] - base_set)
+                expired = max(0, prom_metrics["transfers_expired"] - base_exp)
                 backlog = max(0, ingested - settled - expired)
 
                 data = {
@@ -1071,14 +1136,17 @@ class DashboardRequestHandler(http.server.SimpleHTTPRequestHandler):
             test_state["logs"].clear()
             test_state["cached_keys"].clear()
             test_state["target_url"] = target_url
+            test_state["base_ingested"] = prom_metrics["requests_202"]
+            test_state["base_settled"] = prom_metrics["transfers_completed"]
+            test_state["base_expired"] = prom_metrics["transfers_expired"]
 
-        stop_event.clear()
+        generator_stop_event.clear()
         threading.Thread(target=load_generator_worker, args=(target_url, target_rps, replay_pct), daemon=True).start()
         threading.Thread(target=metrics_collector_worker, daemon=True).start()
         self.send_json({"status": "started", "rps": target_rps, "target": target_url})
 
     def handle_stop_loadtest(self):
-        stop_event.set()
+        generator_stop_event.set()
         with state_lock:
             test_state["running"] = False
         self.send_json({"status": "stopped"})
