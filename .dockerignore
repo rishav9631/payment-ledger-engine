@@ -1,0 +1,13 @@
+.git
+target/
+.idea/
+*.iml
+.vscode/
+load-test/
+observability/
+*.md
+.env
+.gitignore
+.gitattributes
+Jenkinsfile
+.github/

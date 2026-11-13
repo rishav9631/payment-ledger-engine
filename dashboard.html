@@ -1,0 +1,1035 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Payment Ledger Engine — Live Load Test & Chaos Workbench</title>
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Chart.js -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            brand: {
+              50: '#ecfeff',
+              500: '#06b6d4',
+              600: '#0891b2',
+              700: '#0e7490'
+            }
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Inter:wght@400;500;600;700&display=swap');
+    body { font-family: 'Inter', sans-serif; }
+    .mono { font-family: 'JetBrains Mono', monospace; }
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: #0f172a; }
+    ::-webkit-scrollbar-thumb { background: #334155; border-radius: 3px; }
+  </style>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen flex flex-col">
+
+  <!-- Architecture, SLA & Chaos Overview Modal Popup -->
+  <div id="introModal" class="fixed inset-0 bg-slate-950/85 backdrop-blur-md z-[100] flex items-center justify-center p-4 transition-all duration-300">
+    <div class="bg-slate-900 border border-slate-700/80 rounded-3xl max-w-4xl w-full p-6 shadow-2xl relative flex flex-col max-h-[90vh] ring-1 ring-cyan-500/20">
+      
+      <!-- Modal Header -->
+      <div class="flex items-start justify-between border-b border-slate-800 pb-4 mb-4">
+        <div class="flex items-center gap-3">
+          <div class="w-12 h-12 rounded-2xl bg-gradient-to-tr from-cyan-500 to-blue-600 flex items-center justify-center text-2xl shadow-lg shadow-cyan-500/30">
+            ⚡
+          </div>
+          <div>
+            <div class="flex items-center gap-2">
+              <h2 class="text-xl font-bold text-white tracking-tight">Payment Ledger Engine — Architecture & SLA Workbench</h2>
+              <span class="text-xs px-2.5 py-0.5 rounded-full bg-cyan-950 text-cyan-400 border border-cyan-800 font-mono font-semibold">Production Blueprint</span>
+            </div>
+            <p class="text-xs text-slate-400 mt-0.5">High-Throughput Distributed Double-Entry Accounting, Idempotency & Observability Suite</p>
+          </div>
+        </div>
+
+        <!-- Prominent Cross (Close) Icon -->
+        <button onclick="closeIntroModal()" class="w-9 h-9 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white flex items-center justify-center transition border border-slate-700 shadow-sm" title="Close and Enter Dashboard (Esc)">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+          </svg>
+        </button>
+      </div>
+
+      <!-- Big Scrollable Canvas Area -->
+      <div class="overflow-y-auto pr-3 space-y-5 flex-1 text-slate-300 text-sm leading-relaxed">
+        
+        <!-- Section 1: Executive Overview -->
+        <div class="bg-slate-950/60 border border-slate-800/80 rounded-2xl p-4 space-y-2.5">
+          <h3 class="text-xs font-bold uppercase tracking-wider text-cyan-400 flex items-center gap-2">
+            <span>🎯</span> What is this Dashboard & What is it trying to achieve?
+          </h3>
+          <p class="text-xs text-slate-300 leading-relaxed">
+            This dashboard serves as the real-time operational mission control and chaos engineering testing workbench for a distributed, high-throughput payment transfer system. It allows developers, SREs, and architects to visualize, load test, and verify the five foundational guarantees of modern fintech transaction infrastructure:
+          </p>
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1 text-xs">
+            <div class="bg-slate-900/80 border border-slate-800 rounded-xl p-3">
+              <span class="font-bold text-emerald-400 block mb-1">1. Immutable Double-Entry Ledger</span>
+              Every transfer generates strictly balanced, immutable <code>DEBIT</code> and <code>CREDIT</code> entries. Invariant: <span class="font-mono text-cyan-300">∑(Debits) + ∑(Credits) = 0</span>. Balances never drift and cannot go negative.
+            </div>
+            <div class="bg-slate-900/80 border border-slate-800 rounded-xl p-3">
+              <span class="font-bold text-blue-400 block mb-1">2. Zero-Duplicate Idempotency (SETNX)</span>
+              Incoming transfer requests carry a unique <code>Idempotency-Key</code> header. Redis executes an atomic <code>SETNX</code> with 24h TTL. Any retries return the cached transaction response without double-charging accounts.
+            </div>
+            <div class="bg-slate-900/80 border border-slate-800 rounded-xl p-3">
+              <span class="font-bold text-purple-400 block mb-1">3. Deadlock-Free Distributed Locks</span>
+              Transfers concurrently touching Account A and Account B acquire Redisson distributed locks in deterministic lexicographical order (<span class="font-mono text-purple-300">account-lock:min(A,B)</span> then <span class="font-mono text-purple-300">max(A,B)</span>), mathematically preventing deadlocks.
+            </div>
+            <div class="bg-slate-900/80 border border-slate-800 rounded-xl p-3">
+              <span class="font-bold text-amber-400 block mb-1">4. Transactional Outbox & Kafka Streaming</span>
+              Ledger records and event notifications commit atomically inside a single PostgreSQL database transaction. An asynchronous scheduler polls pending events and streams them to Apache Kafka KRaft.
+            </div>
+          </div>
+        </div>
+
+        <!-- Section 2: Visual Architecture Flowchart -->
+        <div class="bg-slate-950/60 border border-slate-800/80 rounded-2xl p-4">
+          <h3 class="text-xs font-bold uppercase tracking-wider text-slate-300 mb-3 flex items-center gap-2">
+            <span>🏛️</span> End-to-End System Architecture & Data Flow
+          </h3>
+          <div class="bg-slate-900 border border-slate-800/80 rounded-xl p-4 font-mono text-[11px] text-slate-300 overflow-x-auto whitespace-pre leading-snug">
+[Client / Load Workbench]
+       │  POST /api/v1/transfers (Header: Idempotency-Key: &lt;UUID&gt;)
+       ▼
+┌────────────────────────────────────────────────────────────────────────┐
+│ Nginx API Gateway (:8088)  ──► Rate Limit (10 req/s, Burst 20)         │
+│                            ──► Security Headers (X-Frame, nosniff)     │
+└───────────────────────────────────┬────────────────────────────────────┘
+                                    │ Proxy Pass
+                                    ▼
+┌────────────────────────────────────────────────────────────────────────┐
+│ Spring Boot 3.3 / Java 21 Engine (:8080)                               │
+│  1. IdempotencyFilter   ──► Redis SETNX (prevents duplicate charges)   │
+│  2. Redisson Lock       ──► Sorted distributed locks (no deadlocks)    │
+│  3. @Transactional      ──► Balanced LedgerEntry (DEBIT + CREDIT = 0)  │
+│                         ──► Atomic Outbox Event insert                 │
+└───────────────────┬───────────────────────────────┬────────────────────┘
+                    │                               │
+                    ▼                               ▼
+┌───────────────────────────────────────┐ ┌──────────────────────────────┐
+│ PostgreSQL 16 (:5432)                 │ │ Apache Kafka KRaft (:9092)   │
+│  • accounts (@Version optimistic lock)│ │  • Topic: ledger.transfers   │
+│  • ledger_entries (Immutable)         │ │  • DLQ: ledger.transfers.dlq │
+│  • outbox_events (Guaranteed delivery)│ └──────────────────────────────┘
+└───────────────────────────────────────┘
+                    ▲
+                    │ Scrapes Metrics (:8080/actuator/prometheus)
+┌───────────────────┴───────────────────┐ ┌──────────────────────────────┐
+│ Prometheus 2.54 (:9090)               │ │ Grafana 11.2 (:3005)         │
+│  • Scrapes every 3s                   │ │  • Live Ledger Dashboard     │
+│  • Evaluates 6 Alert Rules            │ │  • SLA/SLO Executive Board   │
+│  • Evaluates 99.9% SLA & Latency p99  │ │  • SOS Incident War-Room     │
+│                                       │ │  • Anomaly Detection Board   │
+└───────────────────────────────────────┘ └──────────────────────────────┘</div>
+        </div>
+
+        <!-- Section 3: SLA Targets & Grafana Suite -->
+        <div class="bg-slate-950/60 border border-slate-800/80 rounded-2xl p-4 space-y-3">
+          <h3 class="text-xs font-bold uppercase tracking-wider text-slate-300 flex items-center gap-2">
+            <span>📊</span> Production SLAs & Pre-Provisioned Grafana Dashboards
+          </h3>
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
+            <a href="http://localhost:3005/d/ledger-main" target="_blank" class="block bg-slate-900 border border-slate-800 hover:border-cyan-500 rounded-xl p-3 transition group">
+              <div class="flex items-center justify-between text-cyan-400 font-semibold mb-1">
+                <span>1. Main Ledger Performance Dashboard</span>
+                <span class="group-hover:translate-x-1 transition">→</span>
+              </div>
+              <p class="text-slate-400 text-[11px]">Tracks real-time throughput (TPS), response latency percentiles, JVM heap utilization, GC pause duration, and Kafka publish rate.</p>
+            </a>
+
+            <a href="http://localhost:3005/d/ledger-sla-slo" target="_blank" class="block bg-slate-900 border border-slate-800 hover:border-emerald-500 rounded-xl p-3 transition group">
+              <div class="flex items-center justify-between text-emerald-400 font-semibold mb-1">
+                <span>2. SLA & SLO Executive Compliance</span>
+                <span class="group-hover:translate-x-1 transition">→</span>
+              </div>
+              <p class="text-slate-400 text-[11px]">Monitors 99.9% availability target, remaining error budget burndown, and p95/p99 latency threshold compliance against strict boundaries.</p>
+            </a>
+
+            <a href="http://localhost:3005/d/ledger-sos-incident" target="_blank" class="block bg-slate-900 border border-slate-800 hover:border-red-500 rounded-xl p-3 transition group">
+              <div class="flex items-center justify-between text-red-400 font-semibold mb-1">
+                <span>3. SOS Incident & Chaos War-Room</span>
+                <span class="group-hover:translate-x-1 transition">→</span>
+              </div>
+              <p class="text-slate-400 text-[11px]">Real-time triage for firing Prometheus alerts, Nginx 429 rate limit attacks, 5xx server faults, and transactional outbox backlog spikes.</p>
+            </a>
+
+            <a href="http://localhost:3005/d/ledger-anomaly-detection" target="_blank" class="block bg-slate-900 border border-slate-800 hover:border-purple-500 rounded-xl p-3 transition group">
+              <div class="flex items-center justify-between text-purple-400 font-semibold mb-1">
+                <span>4. Real-Time Anomaly & Drift Detector</span>
+                <span class="group-hover:translate-x-1 transition">→</span>
+              </div>
+              <p class="text-slate-400 text-[11px]">Statistical moving-average latency divergence, traffic acceleration shocks (Δ RPS), memory drift linear forecasting, and replay ratio anomalies.</p>
+            </a>
+          </div>
+        </div>
+
+        <!-- Section 4: Chaos Instructions -->
+        <div class="bg-amber-950/20 border border-amber-800/40 rounded-2xl p-4 text-xs text-amber-200/90 space-y-1.5">
+          <span class="font-bold uppercase tracking-wider text-amber-400 block">⚡ How to Trigger Chaos & Fire Alerts in Grafana</span>
+          <p>
+            1. <strong>Trigger Nginx 429 Rate Limiter & Security Alert</strong>: Set the RPS slider above <strong>30 req/s</strong> and click <strong>▶ Start Test</strong>. Watch Nginx throttle traffic and observe the <code class="text-amber-300">SOS_RateLimitingSpike</code> alert trigger in Prometheus and Grafana.
+          </p>
+          <p>
+            2. <strong>Verify Zero-Double-Charge Idempotency</strong>: In the Single Transfer Sandbox, send a transfer, then click <strong>🔁 Replay Key</strong>. Notice the response returns instantly with <code class="text-emerald-300">X-Idempotent-Replay: true</code> and the exact same transaction ID without writing duplicate debit/credit ledger records.
+          </p>
+        </div>
+
+      </div>
+
+      <!-- Modal Footer -->
+      <div class="border-t border-slate-800 pt-4 mt-4 flex items-center justify-between">
+        <label class="flex items-center gap-2 text-xs text-slate-400 cursor-pointer select-none">
+          <input type="checkbox" id="dontShowAgain" class="accent-cyan-500 rounded bg-slate-800 border-slate-700">
+          <span>Don't show this intro automatically on startup</span>
+        </label>
+        <button onclick="closeIntroModal()" class="py-2.5 px-6 rounded-xl font-bold text-xs uppercase tracking-wider bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white shadow-lg shadow-cyan-500/25 transition flex items-center gap-2">
+          🚀 Enter Workbench (✕)
+        </button>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- Header -->
+  <header class="border-b border-slate-800 bg-slate-900/60 backdrop-blur sticky top-0 z-50">
+    <div class="max-w-7xl mx-auto px-4 py-3 flex flex-wrap items-center justify-between gap-4">
+      <div class="flex items-center space-x-3">
+        <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-cyan-500 to-blue-600 flex items-center justify-center font-bold text-white shadow-lg shadow-cyan-500/20">
+          ⚡
+        </div>
+        <div>
+          <h1 class="text-lg font-bold tracking-tight flex items-center gap-2">
+            Payment Ledger Engine
+            <span class="text-xs px-2 py-0.5 rounded-full bg-cyan-950 text-cyan-400 border border-cyan-800 font-mono">v1.0 LIVE</span>
+          </h1>
+          <p class="text-xs text-slate-400">High-Throughput Double-Entry Ledger & Gateway Load Test Tracker</p>
+        </div>
+      </div>
+
+      <!-- Quick External Links -->
+      <div class="flex items-center gap-2 text-xs">
+        <button onclick="openIntroModal()" class="px-3 py-1.5 rounded-lg bg-cyan-950/70 text-cyan-400 border border-cyan-800/80 hover:bg-cyan-900 transition flex items-center gap-1.5 font-medium shadow-sm shadow-cyan-500/10">
+          📖 Architecture & Guide
+        </button>
+        <a href="http://localhost:8089" target="_blank" class="px-3 py-1.5 rounded-lg bg-cyan-950/60 text-cyan-400 border border-cyan-800/60 hover:bg-cyan-900 transition flex items-center gap-1.5 font-medium">
+          ☕ Kafka UI (:8089)
+        </a>
+        <a href="http://localhost:3005" target="_blank" class="px-3 py-1.5 rounded-lg bg-orange-950/60 text-orange-400 border border-orange-800/60 hover:bg-orange-900 transition flex items-center gap-1.5 font-medium">
+          📊 Grafana (:3005)
+        </a>
+        <a href="http://localhost:9090" target="_blank" class="px-3 py-1.5 rounded-lg bg-red-950/60 text-red-400 border border-red-800/60 hover:bg-red-900 transition flex items-center gap-1.5 font-medium">
+          🔥 Prometheus (:9090)
+        </a>
+        <a href="http://localhost:8088/health" target="_blank" class="px-3 py-1.5 rounded-lg bg-emerald-950/60 text-emerald-400 border border-emerald-800/60 hover:bg-emerald-900 transition flex items-center gap-1.5 font-medium">
+          🛡️ Nginx (:8088)
+        </a>
+      </div>
+    </div>
+
+    <!-- System Topology Status Pills -->
+    <div class="bg-slate-900/90 border-t border-slate-800/80 px-4 py-2">
+      <div class="max-w-7xl mx-auto flex items-center gap-2 overflow-x-auto text-xs" id="statusPills">
+        <span class="text-slate-400 mr-1 font-semibold uppercase tracking-wider text-[10px]">Stack Topology:</span>
+        <div id="pill-nginx" class="flex items-center gap-1.5 px-2.5 py-1 rounded bg-slate-800 text-slate-400">
+          <span class="w-2 h-2 rounded-full bg-slate-500"></span> Nginx :8088
+        </div>
+        <div id="pill-backend" class="flex items-center gap-1.5 px-2.5 py-1 rounded bg-slate-800 text-slate-400">
+          <span class="w-2 h-2 rounded-full bg-slate-500"></span> Backend :8080
+        </div>
+        <div id="pill-postgres" class="flex items-center gap-1.5 px-2.5 py-1 rounded bg-slate-800 text-slate-400">
+          <span class="w-2 h-2 rounded-full bg-slate-500"></span> PostgreSQL :5432
+        </div>
+        <div id="pill-redis" class="flex items-center gap-1.5 px-2.5 py-1 rounded bg-slate-800 text-slate-400">
+          <span class="w-2 h-2 rounded-full bg-slate-500"></span> Redis :6379
+        </div>
+        <div id="pill-kafka" class="flex items-center gap-1.5 px-2.5 py-1 rounded bg-slate-800 text-slate-400">
+          <span class="w-2 h-2 rounded-full bg-slate-500"></span> Kafka :9092
+        </div>
+        <div id="pill-kafka-ui" class="flex items-center gap-1.5 px-2.5 py-1 rounded bg-slate-800 text-slate-400">
+          <span class="w-2 h-2 rounded-full bg-slate-500"></span> Kafka UI :8089
+        </div>
+        <div id="pill-prometheus" class="flex items-center gap-1.5 px-2.5 py-1 rounded bg-slate-800 text-slate-400">
+          <span class="w-2 h-2 rounded-full bg-slate-500"></span> Prometheus :9090
+        </div>
+        <div id="pill-grafana" class="flex items-center gap-1.5 px-2.5 py-1 rounded bg-slate-800 text-slate-400">
+          <span class="w-2 h-2 rounded-full bg-slate-500"></span> Grafana :3005
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main Content -->
+  <main class="max-w-7xl mx-auto px-4 py-6 flex-1 w-full space-y-6">
+
+    <!-- Dynamic Cluster Scaling & Round-Robin Load Balancer Deck -->
+    <div class="bg-gradient-to-r from-slate-900 via-slate-900 to-indigo-950/40 border border-indigo-900/50 rounded-2xl p-5 shadow-xl space-y-4">
+      <div class="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 pb-3">
+        <div class="flex items-center gap-3">
+          <div class="w-10 h-10 rounded-xl bg-indigo-600/30 text-indigo-400 border border-indigo-500/40 flex items-center justify-center font-bold text-xl shadow-lg shadow-indigo-500/10">
+            🔀
+          </div>
+          <div>
+            <h2 class="text-sm font-bold uppercase tracking-wider text-slate-100 flex items-center gap-2">
+              Dynamic Cluster Scaling & Round-Robin Load Balancer
+              <span id="clusterBadge" class="text-[10px] px-2 py-0.5 rounded-full bg-indigo-950 text-indigo-300 border border-indigo-800 font-mono">3 Instances Online</span>
+            </h2>
+            <p class="text-xs text-slate-400">Nginx automatically balances incoming transfers across active instances • Shared Redis idempotency & Redisson distributed locks</p>
+          </div>
+        </div>
+
+        <!-- Scale Buttons Stepper -->
+        <div class="flex items-center gap-1.5 bg-slate-950 p-1.5 rounded-xl border border-slate-800 shadow-inner">
+          <span class="text-xs text-slate-400 px-2 font-medium">Scale Cluster:</span>
+          <button onclick="scaleCluster(1)" id="btnScale1" class="px-2.5 py-1.5 rounded-lg text-xs font-bold transition text-slate-400 hover:text-white hover:bg-slate-800">1 Node</button>
+          <button onclick="scaleCluster(2)" id="btnScale2" class="px-2.5 py-1.5 rounded-lg text-xs font-bold transition text-slate-400 hover:text-white hover:bg-slate-800">2 Nodes</button>
+          <button onclick="scaleCluster(3)" id="btnScale3" class="px-2.5 py-1.5 rounded-lg text-xs font-bold transition bg-indigo-600 text-white shadow-md shadow-indigo-600/30">3 Nodes</button>
+          <button onclick="scaleCluster(4)" id="btnScale4" class="px-2.5 py-1.5 rounded-lg text-xs font-bold transition text-slate-400 hover:text-white hover:bg-slate-800">4 Nodes</button>
+          <button onclick="scaleCluster(5)" id="btnScale5" class="px-2.5 py-1.5 rounded-lg text-xs font-bold transition text-slate-400 hover:text-white hover:bg-slate-800">5 Nodes</button>
+        </div>
+      </div>
+
+      <!-- Real-Time Instance Nodes Grid (Refreshes every 2s) -->
+      <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3" id="clusterNodesGrid">
+        <!-- Rendered by fetchInstances() -->
+      </div>
+    </div>
+
+    <!-- Top Grid: Control Deck + Live KPI Cards -->
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+
+      <!-- Control Deck (1 col) -->
+      <div class="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl flex flex-col justify-between">
+        <div>
+          <div class="flex items-center justify-between mb-4">
+            <h2 class="text-sm font-bold uppercase tracking-wider text-slate-300 flex items-center gap-2">
+              <span class="text-cyan-400">⚙️</span> Load Generator Control
+            </h2>
+            <span id="testStatusBadge" class="text-xs px-2.5 py-1 rounded-full font-semibold bg-slate-800 text-slate-400 border border-slate-700">
+              IDLE
+            </span>
+          </div>
+
+          <!-- Preset Buttons -->
+          <div class="grid grid-cols-3 gap-2 mb-4">
+            <button onclick="applyPreset(50, 10)" class="px-2 py-2 text-xs rounded-lg bg-slate-800 hover:bg-slate-700 font-medium transition text-slate-300 hover:text-white border border-slate-700">
+              🟢 Smoke<br><span class="text-[10px] text-emerald-400 font-bold">50 RPS</span>
+            </button>
+            <button onclick="applyPreset(200, 15)" class="px-2 py-2 text-xs rounded-lg bg-slate-800 hover:bg-slate-700 font-medium transition text-slate-300 hover:text-white border border-slate-700">
+              🟡 Queue Burst<br><span class="text-[10px] text-amber-400 font-bold">200 RPS</span>
+            </button>
+            <button onclick="applyPreset(500, 20)" class="px-2 py-2 text-xs rounded-lg bg-slate-800 hover:bg-slate-700 font-medium transition text-slate-300 hover:text-white border border-slate-700">
+              🔴 Heavy Stress<br><span class="text-[10px] text-rose-400 font-bold">500 RPS</span>
+            </button>
+          </div>
+
+          <!-- Rate Slider -->
+          <div class="space-y-3 mb-4">
+            <div>
+              <div class="flex justify-between text-xs font-medium mb-1">
+                <span class="text-slate-400">Target Request Rate:</span>
+                <span id="rpsValue" class="text-cyan-400 font-mono font-bold">100 req/s</span>
+              </div>
+              <input type="range" id="rpsSlider" min="10" max="500" value="100" step="10"
+                oninput="document.getElementById('rpsValue').innerText = this.value + ' req/s'"
+                class="w-full accent-cyan-500 bg-slate-800 h-2 rounded-lg cursor-pointer">
+            </div>
+
+            <div>
+              <div class="flex justify-between text-xs font-medium mb-1">
+                <span class="text-slate-400">Idempotency Replay Ratio:</span>
+                <span id="replayValue" class="text-cyan-400 font-mono font-bold">15%</span>
+              </div>
+              <input type="range" id="replaySlider" min="0" max="50" value="15" step="5"
+                oninput="document.getElementById('replayValue').innerText = this.value + '%'"
+                class="w-full accent-cyan-500 bg-slate-800 h-2 rounded-lg cursor-pointer">
+            </div>
+
+            <div>
+              <label class="block text-xs font-medium text-slate-400 mb-1">Gateway Endpoint:</label>
+              <input type="text" id="targetUrl" value="http://127.0.0.1:8088/api/v1/transfers"
+                class="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 text-xs font-mono text-slate-300 focus:outline-none focus:border-cyan-500">
+            </div>
+          </div>
+        </div>
+
+        <!-- Start / Stop Action Buttons -->
+        <div class="flex gap-2 pt-2 border-t border-slate-800">
+          <button id="btnStart" onclick="startLoadTest()" class="flex-1 py-2.5 px-4 rounded-xl font-bold text-xs uppercase tracking-wider bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 text-slate-950 shadow-lg shadow-emerald-500/20 transition flex items-center justify-center gap-2">
+            ▶ Start Test
+          </button>
+          <button id="btnStop" onclick="stopLoadTest()" disabled class="flex-1 py-2.5 px-4 rounded-xl font-bold text-xs uppercase tracking-wider bg-slate-800 text-slate-500 cursor-not-allowed transition flex items-center justify-center gap-2">
+            ⏹ Stop
+          </button>
+        </div>
+      </div>
+
+      <!-- KPI Metrics Row (2 cols) -->
+      <div class="lg:col-span-2 grid grid-cols-2 md:grid-cols-3 gap-4">
+        <!-- Live RPS -->
+        <div class="bg-slate-900 border border-slate-800 rounded-2xl p-4 flex flex-col justify-between shadow-lg">
+          <div class="flex items-center justify-between text-xs text-slate-400">
+            <span>Live Throughput</span>
+            <span class="text-cyan-400">⚡</span>
+          </div>
+          <div class="my-2">
+            <span id="kpiRps" class="text-3xl font-bold font-mono text-cyan-400">0</span>
+            <span class="text-xs text-slate-500 ml-1">req/s</span>
+          </div>
+          <div class="text-[11px] text-slate-500 flex justify-between">
+            <span>Target: <span id="kpiTargetRps" class="font-mono">100</span></span>
+            <span>Kafka Buffer: <span class="font-mono text-cyan-400 font-bold">5k r/s burst</span></span>
+          </div>
+        </div>
+
+        <!-- Ingested 202 (Queue-First) -->
+        <div class="bg-slate-900 border border-slate-800 rounded-2xl p-4 flex flex-col justify-between shadow-lg">
+          <div class="flex items-center justify-between text-xs text-slate-400">
+            <span>Ingested (202 Queue)</span>
+            <span class="text-cyan-400">📥</span>
+          </div>
+          <div class="my-2">
+            <span id="kpiIngested" class="text-3xl font-bold font-mono text-cyan-300">0</span>
+          </div>
+          <div class="text-[11px] text-slate-500 flex justify-between">
+            <span>Replays: <span id="kpiReplays" class="font-mono text-amber-400">0</span></span>
+            <span>Total: <span id="kpiTotal" class="font-mono text-slate-300">0</span></span>
+          </div>
+        </div>
+
+        <!-- Settled Completed -->
+        <div class="bg-slate-900 border border-slate-800 rounded-2xl p-4 flex flex-col justify-between shadow-lg">
+          <div class="flex items-center justify-between text-xs text-slate-400">
+            <span>Settled (Completed)</span>
+            <span class="text-emerald-400">✓</span>
+          </div>
+          <div class="my-2">
+            <span id="kpiSuccess" class="text-3xl font-bold font-mono text-emerald-400">0</span>
+          </div>
+          <div class="text-[11px] text-slate-500 flex justify-between">
+            <span>Success Rate: <span id="kpiSuccessRate" class="font-mono text-emerald-400">100%</span></span>
+          </div>
+        </div>
+
+        <!-- Expired Gate (Stale >60s / 408) -->
+        <div class="bg-slate-900 border border-slate-800 rounded-2xl p-4 flex flex-col justify-between shadow-lg">
+          <div class="flex items-center justify-between text-xs text-slate-400">
+            <span>Expired Gate (>60s)</span>
+            <span class="text-rose-400">⏳</span>
+          </div>
+          <div class="my-2">
+            <span id="kpiExpired" class="text-3xl font-bold font-mono text-rose-400">0</span>
+          </div>
+          <div class="text-[11px] text-slate-500">
+            <span>Strict 1-Min TTL Gate Active</span>
+          </div>
+        </div>
+
+        <!-- Active Kafka Backlog -->
+        <div class="bg-slate-900 border border-slate-800 rounded-2xl p-4 flex flex-col justify-between shadow-lg">
+          <div class="flex items-center justify-between text-xs text-slate-400">
+            <span>Kafka Ingress Backlog</span>
+            <span class="text-indigo-400">🔄</span>
+          </div>
+          <div class="my-2">
+            <span id="kpiBacklog" class="text-3xl font-bold font-mono text-indigo-400">0</span>
+            <span class="text-xs text-slate-500 ml-1">in queue</span>
+          </div>
+          <div class="text-[11px] text-slate-500 flex justify-between">
+            <span>Absorber: <span class="font-mono text-indigo-400">Zero Drops</span></span>
+          </div>
+        </div>
+
+        <!-- p95 Latency -->
+        <div class="bg-slate-900 border border-slate-800 rounded-2xl p-4 flex flex-col justify-between shadow-lg">
+          <div class="flex items-center justify-between text-xs text-slate-400">
+            <span>p95 Ingress Latency</span>
+            <span class="text-purple-400">⏱️</span>
+          </div>
+          <div class="my-2">
+            <span id="kpiP95" class="text-3xl font-bold font-mono text-purple-400">0</span>
+            <span class="text-xs text-slate-500 ml-1">ms</span>
+          </div>
+          <div class="text-[11px] text-slate-500 flex justify-between">
+            <span>Threshold: <span class="font-mono text-emerald-400">&lt; 10ms (Queue-First)</span></span>
+          </div>
+        </div>
+          </div>
+        </div>
+
+        <!-- p99 Latency -->
+        <div class="bg-slate-900 border border-slate-800 rounded-2xl p-4 flex flex-col justify-between shadow-lg">
+          <div class="flex items-center justify-between text-xs text-slate-400">
+            <span>p99 Response Time</span>
+            <span class="text-pink-400">🎯</span>
+          </div>
+          <div class="my-2">
+            <span id="kpiP99" class="text-3xl font-bold font-mono text-pink-400">0</span>
+            <span class="text-xs text-slate-500 ml-1">ms</span>
+          </div>
+          <div class="text-[11px] text-slate-500 flex justify-between">
+            <span>Threshold: <span class="font-mono text-emerald-400">&lt; 500ms</span></span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Charts Section -->
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <!-- Throughput Chart -->
+      <div class="lg:col-span-2 bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl">
+        <div class="flex items-center justify-between mb-4">
+          <h3 class="text-xs font-bold uppercase tracking-wider text-slate-300">
+            Live Throughput & Rate Limit (RPS)
+          </h3>
+          <span class="text-[11px] font-mono text-slate-500">60-second sliding window</span>
+        </div>
+        <div class="h-64">
+          <canvas id="rpsChart"></canvas>
+        </div>
+      </div>
+
+      <!-- Status Breakdown Donut -->
+      <div class="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl flex flex-col justify-between">
+        <div class="flex items-center justify-between mb-4">
+          <h3 class="text-xs font-bold uppercase tracking-wider text-slate-300">
+            HTTP Status Breakdown
+          </h3>
+          <span class="text-[11px] font-mono text-slate-500">Real-time</span>
+        </div>
+        <div class="h-52 flex items-center justify-center">
+          <canvas id="statusChart"></canvas>
+        </div>
+        <div class="grid grid-cols-2 gap-2 text-xs pt-3 border-t border-slate-800 text-center">
+          <div><span class="inline-block w-2.5 h-2.5 rounded-full bg-emerald-500 mr-1"></span> 200/201 (OK)</div>
+          <div><span class="inline-block w-2.5 h-2.5 rounded-full bg-amber-500 mr-1"></span> 429 (Throttled)</div>
+          <div><span class="inline-block w-2.5 h-2.5 rounded-full bg-blue-500 mr-1"></span> Replays</div>
+          <div><span class="inline-block w-2.5 h-2.5 rounded-full bg-red-500 mr-1"></span> 5xx Errors</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Bottom Row: Single Transfer Workbench + Live Event Feed -->
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+
+      <!-- Single Transfer Workbench (1 col) -->
+      <div class="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl space-y-4">
+        <div class="flex items-center justify-between border-b border-slate-800 pb-3">
+          <h3 class="text-xs font-bold uppercase tracking-wider text-slate-300 flex items-center gap-1.5">
+            <span>🧪</span> Single Transfer Sandbox
+          </h3>
+          <span class="text-[10px] text-slate-500 font-mono">Test Idempotency</span>
+        </div>
+
+        <div class="space-y-3 text-xs">
+          <div>
+            <label class="block text-slate-400 mb-1">Idempotency Key (UUID):</label>
+            <div class="flex gap-2">
+              <input type="text" id="manualKey" placeholder="Auto-generated"
+                class="flex-1 bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1.5 font-mono text-[11px] text-slate-300 focus:outline-none focus:border-cyan-500">
+              <button onclick="generateNewKey()" class="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 rounded-lg text-slate-300 transition" title="Generate New UUID">
+                🎲
+              </button>
+            </div>
+          </div>
+
+          <div>
+            <label class="block text-slate-400 mb-1">Transfer Amount (INR):</label>
+            <input type="number" id="manualAmount" value="250.00" step="10"
+              class="w-full bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1.5 font-mono text-slate-300 focus:outline-none focus:border-cyan-500">
+          </div>
+
+          <div class="flex gap-2 pt-2">
+            <button onclick="sendSingleTransfer(false)" class="flex-1 py-2 px-3 rounded-lg font-bold text-xs bg-cyan-600 hover:bg-cyan-500 text-white transition shadow-lg shadow-cyan-600/20">
+              Send Transfer
+            </button>
+            <button onclick="sendSingleTransfer(true)" class="py-2 px-3 rounded-lg font-medium text-xs bg-slate-800 hover:bg-slate-700 text-amber-400 border border-amber-800/40 transition" title="Replay previous key to test cache">
+              🔁 Replay Key
+            </button>
+          </div>
+
+          <!-- Response Inspector -->
+          <div class="pt-2">
+            <label class="block text-slate-400 mb-1">Response Inspector:</label>
+            <pre id="responseInspector" class="bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-[11px] font-mono text-slate-400 h-36 overflow-auto whitespace-pre-wrap">Click "Send Transfer" to inspect response...</pre>
+          </div>
+        </div>
+      </div>
+
+      <!-- Live Event Feed (2 cols) -->
+      <div class="lg:col-span-2 bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl flex flex-col">
+        <div class="flex items-center justify-between border-b border-slate-800 pb-3 mb-3">
+          <div class="flex items-center gap-2">
+            <span class="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse"></span>
+            <h3 class="text-xs font-bold uppercase tracking-wider text-slate-300">
+              Live Gateway Event Stream
+            </h3>
+          </div>
+          <span class="text-[11px] font-mono text-slate-500">Showing last 30 requests</span>
+        </div>
+
+        <div class="flex-1 overflow-x-auto">
+          <table class="w-full text-left text-xs">
+            <thead>
+              <tr class="text-slate-500 border-b border-slate-800/80 font-mono text-[11px]">
+                <th class="py-2 px-2">TIME</th>
+                <th class="py-2 px-2">STATUS</th>
+                <th class="py-2 px-2">LATENCY</th>
+                <th class="py-2 px-2">IDEMPOTENCY KEY</th>
+                <th class="py-2 px-2 text-indigo-400">SERVED BY (NODE)</th>
+                <th class="py-2 px-2">TYPE</th>
+                <th class="py-2 px-2">DETAIL</th>
+              </tr>
+            </thead>
+            <tbody id="logsTableBody" class="font-mono text-[11px] divide-y divide-slate-800/50">
+              <tr>
+                <td colspan="6" class="py-8 text-center text-slate-500">
+                  No transfers yet. Click "Start Test" above to stream live requests!
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <!-- Footer -->
+  <footer class="border-t border-slate-800/80 bg-slate-950 text-slate-500 text-xs py-3 px-4 text-center">
+    Payment Ledger Engine • Kafka KRaft • Redis Distributed Locks • Nginx Gateway • Prometheus & Grafana
+  </footer>
+
+  <!-- Application Logic -->
+  <script>
+    // Robust API_BASE: works seamlessly whether opened via http://localhost:5000 or file:///...
+    const API_BASE = (window.location.protocol.startsWith('http') && window.location.port !== '')
+      ? `${window.location.protocol}//${window.location.hostname}:5000`
+      : 'http://127.0.0.1:5000';
+
+    let rpsChart = null;
+    let statusChart = null;
+    let isRunning = false;
+    let lastSentKey = '';
+
+    // Initialize Charts
+    function initCharts() {
+      // RPS Line Chart
+      const ctxRps = document.getElementById('rpsChart').getContext('2d');
+      rpsChart = new Chart(ctxRps, {
+        type: 'line',
+        data: {
+          labels: Array(30).fill(''),
+          datasets: [
+            {
+              label: 'Throughput (req/s)',
+              data: Array(30).fill(0),
+              borderColor: '#06b6d4',
+              backgroundColor: 'rgba(6, 182, 212, 0.1)',
+              borderWidth: 2,
+              fill: true,
+              tension: 0.35,
+              pointRadius: 0
+            },
+            {
+              label: 'Rate Limited (429)',
+              data: Array(30).fill(0),
+              borderColor: '#f59e0b',
+              backgroundColor: 'transparent',
+              borderWidth: 1.5,
+              borderDash: [4, 4],
+              tension: 0.2,
+              pointRadius: 0
+            }
+          ]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: { position: 'top', labels: { color: '#94a3b8', font: { size: 10 } } }
+          },
+          scales: {
+            x: { grid: { color: '#1e293b' }, ticks: { color: '#64748b' } },
+            y: { grid: { color: '#1e293b' }, ticks: { color: '#64748b' }, beginAtZero: true }
+          }
+        }
+      });
+
+      // Status Donut Chart
+      const ctxStatus = document.getElementById('statusChart').getContext('2d');
+      statusChart = new Chart(ctxStatus, {
+        type: 'doughnut',
+        data: {
+          labels: ['200/201 OK', '429 Throttled', 'Replays', 'Errors'],
+          datasets: [{
+            data: [1, 0, 0, 0],
+            backgroundColor: ['#10b981', '#f59e0b', '#3b82f6', '#ef4444'],
+            borderWidth: 0
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: { legend: { display: false } },
+          cutout: '72%'
+        }
+      });
+    }
+
+    function applyPreset(rps, replay) {
+      document.getElementById('rpsSlider').value = rps;
+      document.getElementById('rpsValue').innerText = rps + ' req/s';
+      document.getElementById('replaySlider').value = replay;
+      document.getElementById('replayValue').innerText = replay + '%';
+    }
+
+    function generateNewKey() {
+      const key = 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+        const r = Math.random() * 16 | 0, v = c == 'x' ? r : (r & 0x3 | 0x8);
+        return v.toString(16);
+      });
+      document.getElementById('manualKey').value = key;
+      return key;
+    }
+
+    async function fetchStatus() {
+      try {
+        const res = await fetch(`${API_BASE}/api/status`);
+        const data = await res.json();
+        updatePill('pill-nginx', data.nginx?.status === 'UP', 'Nginx :8088');
+        updatePill('pill-backend', data.backend?.status === 'UP', data.backend?.is_mock ? 'Mock Backend :8080' : 'Spring Boot :8080');
+        updatePill('pill-postgres', data.postgres?.status === 'UP', 'PostgreSQL :5432');
+        updatePill('pill-redis', data.redis?.status === 'UP', 'Redis :6379');
+        updatePill('pill-kafka', data.kafka?.status === 'UP', 'Kafka :9092');
+        updatePill('pill-kafka-ui', data.kafka_ui?.status === 'UP', 'Kafka UI :8089');
+        updatePill('pill-prometheus', data.prometheus?.status === 'UP', 'Prometheus :9090');
+        updatePill('pill-grafana', data.grafana?.status === 'UP', 'Grafana :3005');
+      } catch (err) {
+        console.error('Status fetch failed', err);
+      }
+    }
+
+    function updatePill(id, isUp, label) {
+      const el = document.getElementById(id);
+      if (!el) return;
+      if (isUp) {
+        el.className = 'flex items-center gap-1.5 px-2.5 py-1 rounded bg-emerald-950/60 text-emerald-400 border border-emerald-800/60';
+        el.innerHTML = `<span class="w-2 h-2 rounded-full bg-emerald-400"></span> ${label}`;
+      } else {
+        el.className = 'flex items-center gap-1.5 px-2.5 py-1 rounded bg-red-950/40 text-red-400 border border-red-800/40';
+        el.innerHTML = `<span class="w-2 h-2 rounded-full bg-red-400"></span> ${label}`;
+      }
+    }
+
+    async function startLoadTest() {
+      const rps = parseInt(document.getElementById('rpsSlider').value);
+      const replay = parseInt(document.getElementById('replaySlider').value);
+      const target = document.getElementById('targetUrl').value;
+
+      document.getElementById('kpiTargetRps').innerText = rps;
+
+      try {
+        const res = await fetch(`${API_BASE}/api/loadtest/start`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ rps: rps, replay_pct: replay, target: target })
+        });
+        const data = await res.json();
+        setRunningState(true);
+      } catch (e) {
+        alert('Failed to start test: ' + e + '\n\nTip: Ensure "python server.py" is running on port 5000!');
+      }
+    }
+
+    async function stopLoadTest() {
+      try {
+        await fetch(`${API_BASE}/api/loadtest/stop`, { method: 'POST' });
+        setRunningState(false);
+      } catch (e) {
+        console.error(e);
+      }
+    }
+
+    function setRunningState(running) {
+      isRunning = running;
+      const badge = document.getElementById('testStatusBadge');
+      const btnStart = document.getElementById('btnStart');
+      const btnStop = document.getElementById('btnStop');
+
+      if (running) {
+        badge.className = 'text-xs px-2.5 py-1 rounded-full font-semibold bg-emerald-950 text-emerald-400 border border-emerald-800 animate-pulse';
+        badge.innerText = 'TEST RUNNING';
+        btnStart.disabled = true;
+        btnStart.className = 'flex-1 py-2.5 px-4 rounded-xl font-bold text-xs uppercase tracking-wider bg-slate-800 text-slate-500 cursor-not-allowed';
+        btnStop.disabled = false;
+        btnStop.className = 'flex-1 py-2.5 px-4 rounded-xl font-bold text-xs uppercase tracking-wider bg-rose-600 hover:bg-rose-500 text-white shadow-lg shadow-rose-600/20 transition';
+      } else {
+        badge.className = 'text-xs px-2.5 py-1 rounded-full font-semibold bg-slate-800 text-slate-400 border border-slate-700';
+        badge.innerText = 'IDLE';
+        btnStart.disabled = false;
+        btnStart.className = 'flex-1 py-2.5 px-4 rounded-xl font-bold text-xs uppercase tracking-wider bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 text-slate-950 shadow-lg shadow-emerald-500/20 transition';
+        btnStop.disabled = true;
+        btnStop.className = 'flex-1 py-2.5 px-4 rounded-xl font-bold text-xs uppercase tracking-wider bg-slate-800 text-slate-500 cursor-not-allowed';
+      }
+    }
+
+    async function sendSingleTransfer(isReplay) {
+      let key = document.getElementById('manualKey').value;
+      if (isReplay && lastSentKey) {
+        key = lastSentKey;
+        document.getElementById('manualKey').value = key;
+      } else if (!key) {
+        key = generateNewKey();
+      }
+      lastSentKey = key;
+
+      const amount = parseFloat(document.getElementById('manualAmount').value) || 100.0;
+      const target = document.getElementById('targetUrl').value;
+
+      document.getElementById('responseInspector').innerText = 'Sending request to ' + target + '...';
+
+      try {
+        const res = await fetch(`${API_BASE}/api/transfer/send`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ key: key, amount: amount, target: target })
+        });
+        const data = await res.json();
+        
+        let replayFlag = data.headers && (data.headers['x-idempotent-replay'] || data.headers['X-Idempotent-Replay']);
+        let resultText = `=== TRANSFER EXECUTION ===\n` +
+          `• Routed Node: ${data.servedBy || 'ledger-app-1'}\n` +
+          `• HTTP Status: ${data.status}\n` +
+          `• Response Latency: ${data.latency_ms} ms\n` +
+          `• Idempotency Key: ${data.idempotency_key}\n` +
+          `• Shared Redis Invariant: ${replayFlag ? 'CACHE HIT - Replayed without double charging!' : 'NEW TRANSACTION - Debits/Credits balanced'}\n\n` +
+          `=== RESPONSE JSON ===\n` +
+          JSON.stringify(data.body, null, 2);
+
+        document.getElementById('responseInspector').innerText = resultText;
+      } catch (e) {
+        document.getElementById('responseInspector').innerText = 'Error: ' + e;
+      }
+    }
+
+    async function fetchInstances() {
+      try {
+        const res = await fetch(`${API_BASE}/api/instances/status`);
+        const data = await res.json();
+        
+        const badge = document.getElementById('clusterBadge');
+        if (badge) {
+          badge.innerText = `${data.active_count} Instances Online (Round-Robin)`;
+        }
+
+        for (let i = 1; i <= 5; i++) {
+          const btn = document.getElementById(`btnScale${i}`);
+          if (btn) {
+            if (i === data.active_count) {
+              btn.className = 'px-2.5 py-1.5 rounded-lg text-xs font-bold transition bg-indigo-600 text-white shadow-md shadow-indigo-600/30';
+            } else {
+              btn.className = 'px-2.5 py-1.5 rounded-lg text-xs font-bold transition text-slate-400 hover:text-white hover:bg-slate-800';
+            }
+          }
+        }
+
+        const grid = document.getElementById('clusterNodesGrid');
+        if (grid && data.instances) {
+          grid.innerHTML = data.instances.map(inst => {
+            const isOnline = inst.status === 'ONLINE';
+            const statusTag = isOnline 
+              ? '<span class="flex items-center gap-1 text-[10px] text-emerald-400 font-bold bg-emerald-950/80 px-2 py-0.5 rounded border border-emerald-800"><span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>ONLINE</span>'
+              : '<span class="text-[10px] text-slate-500 font-bold bg-slate-950 px-2 py-0.5 rounded border border-slate-800">STANDBY</span>';
+
+            const cardBorder = isOnline ? 'border-indigo-900/60 bg-slate-900/90 shadow-md' : 'border-slate-800/40 bg-slate-950/40 opacity-40';
+
+            return `
+              <div class="border ${cardBorder} rounded-xl p-3 flex flex-col justify-between transition-all duration-300">
+                <div class="flex items-center justify-between mb-2">
+                  <div class="flex items-center gap-1.5">
+                    <span class="text-xs font-bold font-mono text-slate-200">Node ${inst.node_num}</span>
+                    <span class="text-[10px] font-mono text-slate-500">:${inst.port}</span>
+                  </div>
+                  ${statusTag}
+                </div>
+                
+                <div class="space-y-1.5 my-1 text-xs">
+                  <div class="flex justify-between text-slate-400 text-[11px]">
+                    <span>Transfers:</span>
+                    <span class="font-mono font-bold text-slate-100">${inst.requests}</span>
+                  </div>
+                  <div class="flex justify-between text-slate-400 text-[11px]">
+                    <span>Traffic Share:</span>
+                    <span class="font-mono font-bold text-indigo-400">${inst.share_pct}%</span>
+                  </div>
+                  <div class="w-full bg-slate-950 h-1.5 rounded-full overflow-hidden">
+                    <div class="bg-gradient-to-r from-indigo-500 to-cyan-400 h-full rounded-full transition-all duration-500" style="width: ${inst.share_pct}%"></div>
+                  </div>
+                  <div class="flex justify-between text-slate-400 text-[11px] pt-0.5">
+                    <span>Rate: <span class="font-mono text-cyan-400 font-bold">${inst.rps} r/s</span></span>
+                    <span>Avg: <span class="font-mono text-slate-300">${inst.avg_lat_ms}ms</span></span>
+                  </div>
+                </div>
+              </div>
+            `;
+          }).join('');
+        }
+      } catch (err) {
+        // quiet
+      }
+    }
+
+    async function scaleCluster(count) {
+      try {
+        const res = await fetch(`${API_BASE}/api/instances/scale`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ count: count })
+        });
+        const data = await res.json();
+        await fetchInstances();
+      } catch (e) {
+        alert('Failed to scale cluster: ' + e);
+      }
+    }
+
+    async function pollMetrics() {
+      try {
+        const res = await fetch(`${API_BASE}/api/loadtest/metrics`);
+        const data = await res.json();
+
+        // Update KPIs
+        document.getElementById('kpiRps').innerText = data.current_rps || 0;
+        document.getElementById('kpiTotal').innerText = data.total_requests || 0;
+        document.getElementById('kpiIngested').innerText = data.ingested_202 || 0;
+        document.getElementById('kpiSuccess').innerText = data.settled_completed || data.successful_requests || 0;
+        document.getElementById('kpiExpired').innerText = data.expired_requests || 0;
+        document.getElementById('kpiBacklog').innerText = data.queue_backlog || 0;
+        document.getElementById('kpiReplays').innerText = data.idempotent_replays || 0;
+        document.getElementById('kpiP95').innerText = data.p95 || 0;
+        document.getElementById('kpiP99').innerText = data.p99 || 0;
+
+        const total = data.total_requests || 0;
+        const settled = data.settled_completed || data.successful_requests || 0;
+        const rate = total > 0 ? ((settled / total) * 100).toFixed(1) : 100;
+        document.getElementById('kpiSuccessRate').innerText = rate + '%';
+
+        if (data.running !== isRunning) {
+          setRunningState(data.running);
+        }
+
+        // Update Charts
+        if (data.history && data.history.length > 0) {
+          const labels = data.history.map(h => h.time);
+          const rpsPoints = data.history.map(h => h.rps);
+          const limitPoints = data.history.map(h => h.rate_limited);
+
+          rpsChart.data.labels = labels;
+          rpsChart.data.datasets[0].data = rpsPoints;
+          rpsChart.data.datasets[1].data = limitPoints;
+          rpsChart.update('none');
+        }
+
+        const ok = data.successful_requests || 0;
+        const limited = data.rate_limited_requests || 0;
+        const replays = data.idempotent_replays || 0;
+        const errors = data.failed_requests || 0;
+        statusChart.data.datasets[0].data = [ok, limited, replays, errors];
+        statusChart.update('none');
+
+        // Update Logs Table
+        if (data.logs && data.logs.length > 0) {
+          const tbody = document.getElementById('logsTableBody');
+          tbody.innerHTML = data.logs.map(log => {
+            let statusBadge = '<span class="text-emerald-400 bg-emerald-950/80 px-1.5 py-0.5 rounded border border-emerald-800">' + log.status + '</span>';
+            if (log.status === 429) {
+              statusBadge = '<span class="text-amber-400 bg-amber-950/80 px-1.5 py-0.5 rounded border border-amber-800">429 LIMIT</span>';
+            } else if (log.status >= 500) {
+              statusBadge = '<span class="text-rose-400 bg-rose-950/80 px-1.5 py-0.5 rounded border border-rose-800">' + log.status + ' ERR</span>';
+            }
+
+            const typeBadge = log.is_replay
+              ? '<span class="text-blue-400 bg-blue-950/80 px-1.5 py-0.5 rounded">REPLAY</span>'
+              : '<span class="text-slate-400">NEW</span>';
+
+            let nodeBadge = '<span class="text-indigo-400 bg-indigo-950/80 px-2 py-0.5 rounded border border-indigo-800 font-bold">' + (log.node || 'NODE-1') + '</span>';
+            if (log.node && log.node.includes('2')) {
+              nodeBadge = '<span class="text-purple-400 bg-purple-950/80 px-2 py-0.5 rounded border border-purple-800 font-bold">' + log.node + '</span>';
+            } else if (log.node && log.node.includes('3')) {
+              nodeBadge = '<span class="text-cyan-400 bg-cyan-950/80 px-2 py-0.5 rounded border border-cyan-800 font-bold">' + log.node + '</span>';
+            } else if (log.node && log.node.includes('4')) {
+              nodeBadge = '<span class="text-emerald-400 bg-emerald-950/80 px-2 py-0.5 rounded border border-emerald-800 font-bold">' + log.node + '</span>';
+            } else if (log.node && log.node.includes('5')) {
+              nodeBadge = '<span class="text-amber-400 bg-amber-950/80 px-2 py-0.5 rounded border border-amber-800 font-bold">' + log.node + '</span>';
+            }
+
+            return `<tr>
+              <td class="py-1.5 px-2 text-slate-400">${log.timestamp}</td>
+              <td class="py-1.5 px-2">${statusBadge}</td>
+              <td class="py-1.5 px-2 text-slate-300">${log.latency_ms}ms</td>
+              <td class="py-1.5 px-2 text-cyan-400">${log.key}</td>
+              <td class="py-1.5 px-2">${nodeBadge}</td>
+              <td class="py-1.5 px-2">${typeBadge}</td>
+              <td class="py-1.5 px-2 text-slate-400 truncate max-w-xs">${log.detail}</td>
+            </tr>`;
+          }).join('');
+        }
+
+      } catch (err) {
+        // quiet error on shutdown
+      }
+    }
+
+    function closeIntroModal() {
+      const modal = document.getElementById('introModal');
+      if (modal) {
+        modal.classList.add('opacity-0', 'pointer-events-none');
+        setTimeout(() => { modal.style.display = 'none'; }, 200);
+      }
+      if (document.getElementById('dontShowAgain')?.checked) {
+        localStorage.setItem('ledger_hide_intro', 'true');
+      }
+    }
+
+    function openIntroModal() {
+      const modal = document.getElementById('introModal');
+      if (modal) {
+        modal.style.display = 'flex';
+        modal.classList.remove('opacity-0', 'pointer-events-none');
+      }
+    }
+
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') closeIntroModal();
+    });
+
+    window.onload = () => {
+      initCharts();
+      generateNewKey();
+      fetchStatus();
+      fetchInstances();
+      setInterval(fetchStatus, 3000);
+      setInterval(pollMetrics, 1000);
+      setInterval(fetchInstances, 2000);
+
+      // Check if user previously checked "don't show again"
+      if (localStorage.getItem('ledger_hide_intro') === 'true') {
+        const modal = document.getElementById('introModal');
+        if (modal) modal.style.display = 'none';
+      }
+    };
+  </script>
+</body>
+</html>
+

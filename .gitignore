@@ -1,0 +1,29 @@
+# === Build output ===
+target/
+*.class
+*.jar
+
+# === IDE ===
+.idea/
+*.iml
+.vscode/
+
+# === Gradle ===
+.gradle/
+
+# === Environment & secrets ===
+.env
+
+# === Logs ===
+*.log
+
+# === OS artifacts ===
+.DS_Store
+
+# === Node (k6 / tooling) ===
+node_modules/
+
+# === Python ===
+__pycache__/
+*.pyc
+*.pyo

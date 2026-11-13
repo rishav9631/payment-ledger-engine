@@ -1,0 +1,8 @@
+# Force LF line endings everywhere to prevent WSL2/Docker breakage
+* text=auto eol=lf
+*.java text eol=lf
+*.yml text eol=lf
+*.xml text eol=lf
+*.sql text eol=lf
+*.sh text eol=lf
+*.bat text eol=crlf
