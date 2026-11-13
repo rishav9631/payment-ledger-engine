@@ -946,6 +946,119 @@ def metrics_collector_worker():
 
 
 # ---------------------------------------------------------------------------
+# Complete Environment Reset (Kafka Topics, Redis Cache, Node & Metrics State)
+# ---------------------------------------------------------------------------
+def reset_environment():
+    global kafka_producer
+    details = {}
+
+    # 1. Stop active load generation
+    generator_stop_event.set()
+    with state_lock:
+        test_state["running"] = False
+
+    # 2. Flush Redis cache & distributed locks
+    try:
+        res = subprocess.run(["docker", "exec", "ledger-redis", "redis-cli", "FLUSHALL"], capture_output=True, text=True, timeout=5)
+        details["redis"] = "FLUSHALL OK" if res.returncode == 0 else (res.stderr or res.stdout).strip()
+    except Exception as e:
+        details["redis"] = f"Notice: {e}"
+
+    # 3. Clean and recreate Kafka Topics with 6 Partitions
+    topics_to_reset = [
+        "payment-requests",
+        "ledger.transfers.completed",
+        "ledger.outbox.events",
+        "ledger.transfers.expired",
+        "payment-requests-dlq"
+    ]
+    kafka_results = []
+    for topic in topics_to_reset:
+        try:
+            # Delete topic
+            subprocess.run(["docker", "exec", "ledger-kafka", "/opt/kafka/bin/kafka-topics.sh", "--bootstrap-server", "localhost:9092", "--delete", "--topic", topic], capture_output=True, timeout=5)
+            # Recreate with 6 partitions
+            res_c = subprocess.run(["docker", "exec", "ledger-kafka", "/opt/kafka/bin/kafka-topics.sh", "--bootstrap-server", "localhost:9092", "--create", "--topic", topic, "--partitions", "6", "--replication-factor", "1"], capture_output=True, text=True, timeout=5)
+            if res_c.returncode == 0:
+                kafka_results.append(f"{topic} (6 partitions, offset 0)")
+            else:
+                kafka_results.append(f"{topic} (purged)")
+        except Exception as ex:
+            kafka_results.append(f"{topic} ({ex})")
+    details["kafka_topics"] = kafka_results
+
+    # 4. Reset Kafka producer instance
+    try:
+        if kafka_producer:
+            kafka_producer.close(timeout=2)
+    except Exception:
+        pass
+    kafka_producer = None
+
+    # 5. Reset all in-memory cluster stats, Prometheus counters & test history
+    with state_lock:
+        shared_idempotency_store.clear()
+        shared_lock_registry.clear()
+
+        for node in nodes:
+            node.requests = 0
+            node.replays = 0
+            node.current_rps = 0.0
+            node.latencies.clear()
+            node.req_history.clear()
+
+        test_state["running"] = False
+        test_state["total_requests"] = 0
+        test_state["successful_requests"] = 0
+        test_state["ingested_202_requests"] = 0
+        test_state["settled_completed"] = 0
+        test_state["expired_requests"] = 0
+        test_state["rate_limited_requests"] = 0
+        test_state["idempotent_replays"] = 0
+        test_state["failed_requests"] = 0
+        test_state["current_rps"] = 0.0
+        test_state["latencies_ms"].clear()
+        test_state["history"].clear()
+        test_state["logs"].clear()
+        test_state["cached_keys"].clear()
+        test_state["base_ingested"] = 0
+        test_state["base_settled"] = 0
+        test_state["base_expired"] = 0
+
+        prom_metrics["requests_202"] = 0
+        prom_metrics["requests_201"] = 0
+        prom_metrics["requests_200"] = 0
+        prom_metrics["requests_408"] = 0
+        prom_metrics["requests_429"] = 0
+        prom_metrics["requests_500"] = 0
+        prom_metrics["transfers_total"] = 0
+        prom_metrics["transfers_completed"] = 0
+        prom_metrics["transfers_expired"] = 0
+        prom_metrics["transfers_active"] = 0
+        prom_metrics["total_seconds_sum"] = 0.0
+        prom_metrics["max_seconds"] = 0.0
+        prom_metrics["bucket_0_01"] = 0
+        prom_metrics["bucket_0_025"] = 0
+        prom_metrics["bucket_0_05"] = 0
+        prom_metrics["bucket_0_1"] = 0
+        prom_metrics["bucket_0_25"] = 0
+        prom_metrics["bucket_0_5"] = 0
+        prom_metrics["bucket_1_0"] = 0
+        prom_metrics["bucket_inf"] = 0
+        prom_metrics["kafka_sent"] = 0
+        prom_metrics["outbox_pending"] = 0
+    details["in_memory_metrics"] = "All cluster node counters, Prometheus metrics, and test history reset to 0"
+
+    # 6. Re-sync active Nginx upstream nodes
+    active = [n for n in nodes if n.status == "ONLINE"]
+    reconfigure_nginx(active if active else nodes[:3])
+    details["nginx_status"] = f"Reloaded with {len(active) if active else 3} upstream nodes"
+
+    print("[*] Complete Environment Reset successfully executed!")
+    return details
+
+
+# ---------------------------------------------------------------------------
 # Dashboard API Server Handler (Port 5000)
 # ---------------------------------------------------------------------------
 class DashboardRequestHandler(http.server.SimpleHTTPRequestHandler):
@@ -1030,6 +1143,9 @@ class DashboardRequestHandler(http.server.SimpleHTTPRequestHandler):
             count = int(req_data.get("count", 3))
             scaled_count = scale_cluster(count)
             self.send_json({"status": "scaled", "active_instances": scaled_count})
+        elif self.path == "/api/env/reset":
+            details = reset_environment()
+            self.send_json({"status": "environment_reset_complete", "details": details})
         else:
             self.send_response(404)
             self.end_headers()

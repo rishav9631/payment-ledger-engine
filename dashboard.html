@@ -235,6 +235,9 @@
         <a href="http://localhost:8088/health" target="_blank" class="px-3 py-1.5 rounded-lg bg-emerald-950/60 text-emerald-400 border border-emerald-800/60 hover:bg-emerald-900 transition flex items-center gap-1.5 font-medium">
           🛡️ Nginx (:8088)
         </a>
+        <button onclick="resetEnvironment()" id="btnResetEnv" class="px-3 py-1.5 rounded-lg bg-rose-950/80 text-rose-300 border border-rose-800/80 hover:bg-rose-900 transition flex items-center gap-1.5 font-bold shadow-sm shadow-rose-900/20">
+          🔄 Reset Environment
+        </button>
       </div>
     </div>
 
@@ -758,6 +761,29 @@
         setRunningState(false);
       } catch (e) {
         console.error(e);
+      }
+    }
+
+    async function resetEnvironment() {
+      if (!confirm("Are you sure you want to completely reset the environment?\n\n• Purge & recreate all Kafka topics (6 partitions, offset 0)\n• Flush Redis cache & idempotency store\n• Reset all cluster node counters, Prometheus metrics, and test history to 0")) {
+        return;
+      }
+      const btn = document.getElementById('btnResetEnv');
+      const origText = btn.innerHTML;
+      btn.disabled = true;
+      btn.innerHTML = '<span>⏳ Resetting...</span>';
+      try {
+        const res = await fetch(`${API_BASE}/api/env/reset`, { method: 'POST' });
+        const data = await res.json();
+        setRunningState(false);
+        await fetchInstances();
+        await pollMetrics();
+        alert("✅ Environment Reset Complete!\n\n• Kafka Topics: " + (data.details && data.details.kafka_topics ? data.details.kafka_topics.length + " topics recreated (offset 0)" : "OK") + "\n• Redis: " + (data.details ? data.details.redis : "OK") + "\n• Cluster & Metrics: Clean 0 baseline");
+      } catch (e) {
+        alert("Error resetting environment: " + e);
+      } finally {
+        btn.disabled = false;
+        btn.innerHTML = origText;
       }
     }
 
