@@ -152,7 +152,7 @@
             <span>📊</span> Production SLAs & Pre-Provisioned Grafana Dashboards
           </h3>
           <div class="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
-            <a href="http://localhost:3005/d/ledger-main" target="_blank" class="block bg-slate-900 border border-slate-800 hover:border-cyan-500 rounded-xl p-3 transition group">
+            <a id="modal-link-gmain" href="http://localhost:3005/d/ledger-main" target="_blank" class="block bg-slate-900 border border-slate-800 hover:border-cyan-500 rounded-xl p-3 transition group">
               <div class="flex items-center justify-between text-cyan-400 font-semibold mb-1">
                 <span>1. Main Ledger Performance Dashboard</span>
                 <span class="group-hover:translate-x-1 transition">→</span>
@@ -160,7 +160,7 @@
               <p class="text-slate-400 text-[11px]">Tracks real-time throughput (TPS), response latency percentiles, JVM heap utilization, GC pause duration, and Kafka publish rate.</p>
             </a>
 
-            <a href="http://localhost:3005/d/ledger-sla-slo" target="_blank" class="block bg-slate-900 border border-slate-800 hover:border-emerald-500 rounded-xl p-3 transition group">
+            <a id="modal-link-gsla" href="http://localhost:3005/d/ledger-sla-slo" target="_blank" class="block bg-slate-900 border border-slate-800 hover:border-emerald-500 rounded-xl p-3 transition group">
               <div class="flex items-center justify-between text-emerald-400 font-semibold mb-1">
                 <span>2. SLA & SLO Executive Compliance</span>
                 <span class="group-hover:translate-x-1 transition">→</span>
@@ -168,7 +168,7 @@
               <p class="text-slate-400 text-[11px]">Monitors 99.9% availability target, remaining error budget burndown, and p95/p99 latency threshold compliance against strict boundaries.</p>
             </a>
 
-            <a href="http://localhost:3005/d/ledger-sos-incident" target="_blank" class="block bg-slate-900 border border-slate-800 hover:border-red-500 rounded-xl p-3 transition group">
+            <a id="modal-link-gsos" href="http://localhost:3005/d/ledger-sos-incident" target="_blank" class="block bg-slate-900 border border-slate-800 hover:border-red-500 rounded-xl p-3 transition group">
               <div class="flex items-center justify-between text-red-400 font-semibold mb-1">
                 <span>3. SOS Incident & Chaos War-Room</span>
                 <span class="group-hover:translate-x-1 transition">→</span>
@@ -176,7 +176,7 @@
               <p class="text-slate-400 text-[11px]">Real-time triage for firing Prometheus alerts, Nginx 429 rate limit attacks, 5xx server faults, and transactional outbox backlog spikes.</p>
             </a>
 
-            <a href="http://localhost:3005/d/ledger-anomaly-detection" target="_blank" class="block bg-slate-900 border border-slate-800 hover:border-purple-500 rounded-xl p-3 transition group">
+            <a id="modal-link-ganomaly" href="http://localhost:3005/d/ledger-anomaly-detection" target="_blank" class="block bg-slate-900 border border-slate-800 hover:border-purple-500 rounded-xl p-3 transition group">
               <div class="flex items-center justify-between text-purple-400 font-semibold mb-1">
                 <span>4. Real-Time Anomaly & Drift Detector</span>
                 <span class="group-hover:translate-x-1 transition">→</span>
@@ -234,16 +234,16 @@
         <button onclick="openIntroModal()" class="px-3 py-1.5 rounded-lg bg-cyan-950/70 text-cyan-400 border border-cyan-800/80 hover:bg-cyan-900 transition flex items-center gap-1.5 font-medium shadow-sm shadow-cyan-500/10">
           📖 Architecture & Guide
         </button>
-        <a href="http://localhost:8089" target="_blank" class="px-3 py-1.5 rounded-lg bg-cyan-950/60 text-cyan-400 border border-cyan-800/60 hover:bg-cyan-900 transition flex items-center gap-1.5 font-medium">
+        <a id="link-kafka-ui" href="http://localhost:8089" target="_blank" class="px-3 py-1.5 rounded-lg bg-cyan-950/60 text-cyan-400 border border-cyan-800/60 hover:bg-cyan-900 transition flex items-center gap-1.5 font-medium">
           ☕ Kafka UI (:8089)
         </a>
-        <a href="http://localhost:3005" target="_blank" class="px-3 py-1.5 rounded-lg bg-orange-950/60 text-orange-400 border border-orange-800/60 hover:bg-orange-900 transition flex items-center gap-1.5 font-medium">
+        <a id="link-grafana" href="http://localhost:3005" target="_blank" class="px-3 py-1.5 rounded-lg bg-orange-950/60 text-orange-400 border border-orange-800/60 hover:bg-orange-900 transition flex items-center gap-1.5 font-medium">
           📊 Grafana (:3005)
         </a>
-        <a href="http://localhost:9090" target="_blank" class="px-3 py-1.5 rounded-lg bg-red-950/60 text-red-400 border border-red-800/60 hover:bg-red-900 transition flex items-center gap-1.5 font-medium">
+        <a id="link-prometheus" href="http://localhost:9090" target="_blank" class="px-3 py-1.5 rounded-lg bg-red-950/60 text-red-400 border border-red-800/60 hover:bg-red-900 transition flex items-center gap-1.5 font-medium">
           🔥 Prometheus (:9090)
         </a>
-        <a href="http://localhost:8088/health" target="_blank" class="px-3 py-1.5 rounded-lg bg-emerald-950/60 text-emerald-400 border border-emerald-800/60 hover:bg-emerald-900 transition flex items-center gap-1.5 font-medium">
+        <a id="link-nginx" href="http://localhost:8088/health" target="_blank" class="px-3 py-1.5 rounded-lg bg-emerald-950/60 text-emerald-400 border border-emerald-800/60 hover:bg-emerald-900 transition flex items-center gap-1.5 font-medium">
           🛡️ Nginx (:8088)
         </a>
         <button onclick="resetEnvironment()" id="btnResetEnv" class="px-3 py-1.5 rounded-lg bg-rose-950/80 text-rose-300 border border-rose-800/80 hover:bg-rose-900 transition flex items-center gap-1.5 font-bold shadow-sm shadow-rose-900/20">
@@ -1048,11 +1048,49 @@
       }
     }
 
+    function updateDynamicLinks() {
+      const host = (window.location.hostname && window.location.hostname !== '') ? window.location.hostname : '127.0.0.1';
+      const proto = window.location.protocol.startsWith('http') ? window.location.protocol : 'http:';
+
+      // Header navigation pills
+      const kafkaLink = document.getElementById('link-kafka-ui');
+      if (kafkaLink) kafkaLink.href = `${proto}//${host}:8089`;
+
+      const grafanaLink = document.getElementById('link-grafana');
+      if (grafanaLink) grafanaLink.href = `${proto}//${host}:3005`;
+
+      const promLink = document.getElementById('link-prometheus');
+      if (promLink) promLink.href = `${proto}//${host}:9090`;
+
+      const nginxLink = document.getElementById('link-nginx');
+      if (nginxLink) nginxLink.href = `${proto}//${host}:8088/health`;
+
+      // Architecture modal Grafana dashboard links
+      const gMain = document.getElementById('modal-link-gmain');
+      if (gMain) gMain.href = `${proto}//${host}:3005/d/ledger-main`;
+
+      const gSla = document.getElementById('modal-link-gsla');
+      if (gSla) gSla.href = `${proto}//${host}:3005/d/ledger-sla-slo`;
+
+      const gSos = document.getElementById('modal-link-gsos');
+      if (gSos) gSos.href = `${proto}//${host}:3005/d/ledger-sos-incident`;
+
+      const gAnomaly = document.getElementById('modal-link-ganomaly');
+      if (gAnomaly) gAnomaly.href = `${proto}//${host}:3005/d/ledger-anomaly-detection`;
+
+      // Set target URL dynamically if opened via external/cloud IP
+      const targetInput = document.getElementById('targetUrl');
+      if (targetInput && host !== 'localhost' && host !== '127.0.0.1') {
+        targetInput.value = `http://${host}:8088/api/v1/transfers`;
+      }
+    }
+
     document.addEventListener('keydown', (e) => {
       if (e.key === 'Escape') closeIntroModal();
     });
 
     window.onload = () => {
+      updateDynamicLinks();
       initCharts();
       generateNewKey();
       fetchStatus();
