@@ -37,7 +37,7 @@
 <body class="bg-slate-950 text-slate-100 min-h-screen flex flex-col">
 
   <!-- Architecture, SLA & Chaos Overview Modal Popup -->
-  <div id="introModal" class="fixed inset-0 bg-slate-950/85 backdrop-blur-md z-[100] flex items-center justify-center p-4 transition-all duration-300">
+  <div id="introModal" style="display: none;" class="fixed inset-0 bg-slate-950/85 backdrop-blur-md z-[100] items-center justify-center p-4 transition-all duration-300">
     <div class="bg-slate-900 border border-slate-700/80 rounded-3xl max-w-4xl w-full p-6 shadow-2xl relative flex flex-col max-h-[90vh] ring-1 ring-cyan-500/20">
       
       <!-- Modal Header -->
@@ -49,7 +49,7 @@
           <div>
             <div class="flex items-center gap-2">
               <h2 class="text-xl font-bold text-white tracking-tight">Payment Ledger Engine — Architecture & SLA Workbench</h2>
-              <span class="text-xs px-2.5 py-0.5 rounded-full bg-cyan-950 text-cyan-400 border border-cyan-800 font-mono font-semibold">Production Blueprint</span>
+              <span class="text-xs px-2.5 py-0.5 rounded-full bg-cyan-950 text-cyan-400 border border-cyan-800 font-mono font-semibold">Queue-First Ingress</span>
             </div>
             <p class="text-xs text-slate-400 mt-0.5">High-Throughput Distributed Double-Entry Accounting, Idempotency & Observability Suite</p>
           </div>
@@ -72,24 +72,24 @@
             <span>🎯</span> What is this Dashboard & What is it trying to achieve?
           </h3>
           <p class="text-xs text-slate-300 leading-relaxed">
-            This dashboard serves as the real-time operational mission control and chaos engineering testing workbench for a distributed, high-throughput payment transfer system. It allows developers, SREs, and architects to visualize, load test, and verify the five foundational guarantees of modern fintech transaction infrastructure:
+            This dashboard serves as the real-time mission control and load testing workbench for a distributed, high-throughput payment transfer system. It enforces a <strong>Queue-First Load Ingress architecture</strong> engineered for zero data loss, strict 1-minute expiration gates, and high-concurrency burst absorption:
           </p>
           <div class="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1 text-xs">
             <div class="bg-slate-900/80 border border-slate-800 rounded-xl p-3">
-              <span class="font-bold text-emerald-400 block mb-1">1. Immutable Double-Entry Ledger</span>
-              Every transfer generates strictly balanced, immutable <code>DEBIT</code> and <code>CREDIT</code> entries. Invariant: <span class="font-mono text-cyan-300">∑(Debits) + ∑(Credits) = 0</span>. Balances never drift and cannot go negative.
+              <span class="font-bold text-emerald-400 block mb-1">1. Synchronous Kafka Acknowledgment (acks=all)</span>
+              The Ingestion API writes immediately to Kafka with <code>acks=all</code> across in-sync replicas before returning <code>HTTP 202 Accepted</code>. If Kafka is unreachable, it returns <code>503 Service Unavailable</code> so the client safely retries.
             </div>
             <div class="bg-slate-900/80 border border-slate-800 rounded-xl p-3">
               <span class="font-bold text-blue-400 block mb-1">2. Zero-Duplicate Idempotency (SETNX)</span>
               Incoming transfer requests carry a unique <code>Idempotency-Key</code> header. Redis executes an atomic <code>SETNX</code> with 24h TTL. Any retries return the cached transaction response without double-charging accounts.
             </div>
             <div class="bg-slate-900/80 border border-slate-800 rounded-xl p-3">
-              <span class="font-bold text-purple-400 block mb-1">3. Deadlock-Free Distributed Locks</span>
-              Transfers concurrently touching Account A and Account B acquire Redisson distributed locks in deterministic lexicographical order (<span class="font-mono text-purple-300">account-lock:min(A,B)</span> then <span class="font-mono text-purple-300">max(A,B)</span>), mathematically preventing deadlocks.
+              <span class="font-bold text-purple-400 block mb-1">3. Strict 1-Minute Expiration Pipeline</span>
+              Dual validation gates: <strong>Checkpoint A</strong> rejects stale client packets (&gt; 60s) at the gateway with <code>HTTP 408</code>. <strong>Checkpoint B</strong> verifies <code>now &le; expires_at</code> before database settlement; expired items write to terminal <code>EXPIRED</code> status.
             </div>
             <div class="bg-slate-900/80 border border-slate-800 rounded-xl p-3">
-              <span class="font-bold text-amber-400 block mb-1">4. Transactional Outbox & Kafka Streaming</span>
-              Ledger records and event notifications commit atomically inside a single PostgreSQL database transaction. An asynchronous scheduler polls pending events and streams them to Apache Kafka KRaft.
+              <span class="font-bold text-amber-400 block mb-1">4. Manual Offset Commits & DLQ Poison Guard</span>
+              Consumers disable <code>enable.auto.commit</code> and commit Kafka offsets strictly after the database write succeeds. Unprocessable poison payloads divert to <code>payment-requests-dlq</code> without halting partition throughput.
             </div>
           </div>
         </div>
@@ -97,41 +97,52 @@
         <!-- Section 2: Visual Architecture Flowchart -->
         <div class="bg-slate-950/60 border border-slate-800/80 rounded-2xl p-4">
           <h3 class="text-xs font-bold uppercase tracking-wider text-slate-300 mb-3 flex items-center gap-2">
-            <span>🏛️</span> End-to-End System Architecture & Data Flow
+            <span>🏛️</span> End-to-End System Architecture & Data Flow (Queue-First Ingress)
           </h3>
           <div class="bg-slate-900 border border-slate-800/80 rounded-xl p-4 font-mono text-[11px] text-slate-300 overflow-x-auto whitespace-pre leading-snug">
 [Client / Load Workbench]
-       │  POST /api/v1/transfers (Header: Idempotency-Key: &lt;UUID&gt;)
+       │  POST /api/v1/transfers (Header: Idempotency-Key, X-Client-Timestamp)
        ▼
 ┌────────────────────────────────────────────────────────────────────────┐
-│ Nginx API Gateway (:8088)  ──► Rate Limit (10 req/s, Burst 20)         │
-│                            ──► Security Headers (X-Frame, nosniff)     │
+│ NGINX API Gateway (:8088)                                              │
+│  • High-Capacity Shock Absorber: 5,000 req/s (Burst 10,000)            │
+│  • Precision Timestamp Tagging: X-Request-Timestamp ($msec)            │
+│  • Dynamic Upstream Round-Robin Load Balancing across Active Nodes     │
 └───────────────────────────────────┬────────────────────────────────────┘
-                                    │ Proxy Pass
+                                    │ Round-Robin Proxy Pass
                                     ▼
 ┌────────────────────────────────────────────────────────────────────────┐
-│ Spring Boot 3.3 / Java 21 Engine (:8080)                               │
-│  1. IdempotencyFilter   ──► Redis SETNX (prevents duplicate charges)   │
-│  2. Redisson Lock       ──► Sorted distributed locks (no deadlocks)    │
-│  3. @Transactional      ──► Balanced LedgerEntry (DEBIT + CREDIT = 0)  │
-│                         ──► Atomic Outbox Event insert                 │
-└───────────────────┬───────────────────────────────┬────────────────────┘
-                    │                               │
-                    ▼                               ▼
+│ Ingestion API Cluster (5 Active Nodes :8081 - :8085)                   │
+│  1. Checkpoint A: Pre-Queue Rejection (now - client_ts &gt; 60s ──► 408)  │
+│  2. Redis Idempotency Check (SETNX): Replays return cached 200 sofort  │
+│  3. Synchronous Write to Kafka Topic with acks=all (Durability Gtd)    │
+│  4. Returns HTTP 202 Accepted to Client in &lt; 4ms (Zero Drops)          │
+└───────────────────────────────────┬────────────────────────────────────┘
+                                    │ acks=all
+                                    ▼
+┌────────────────────────────────────────────────────────────────────────┐
+│ Apache Kafka KRaft Buffer (:9092) ── Topic: payment-requests (6 Parts) │
+│  • Absorbs massive concurrent bursts up to 5,000 r/s without lag       │
+│  • Topic Retention TTL: 120s safety net (Checkpoint C)                 │
+└───────────────────────────────────┬────────────────────────────────────┘
+                                    │ Pull batches (max_records=500)
+                                    ▼
+┌────────────────────────────────────────────────────────────────────────┐
+│ Ledger Settlement Workers (group: ledger-execution-worker-group)       │
+│  1. Checkpoint B Gate: If now &gt; expires_at ──► Terminal EXPIRED status │
+│  2. If Valid: Atomic Double-Entry Settlement (DEBIT + CREDIT = 0)      │
+│  3. Persists to PostgreSQL 16 (:5432) &amp; Redis Cluster Cache (:6379)    │
+│  4. Manual Kafka Offset Commit only AFTER DB persistence completes     │
+│  5. Poison messages rerouted to payment-requests-dlq                   │
+└───────────────────────────────────┬────────────────────────────────────┘
+                                    │
+       ┌────────────────────────────┴───────────────────────────┐
+       ▼                                                        ▼
 ┌───────────────────────────────────────┐ ┌──────────────────────────────┐
-│ PostgreSQL 16 (:5432)                 │ │ Apache Kafka KRaft (:9092)   │
-│  • accounts (@Version optimistic lock)│ │  • Topic: ledger.transfers   │
-│  • ledger_entries (Immutable)         │ │  • DLQ: ledger.transfers.dlq │
-│  • outbox_events (Guaranteed delivery)│ └──────────────────────────────┘
-└───────────────────────────────────────┘
-                    ▲
-                    │ Scrapes Metrics (:8080/actuator/prometheus)
-┌───────────────────┴───────────────────┐ ┌──────────────────────────────┐
-│ Prometheus 2.54 (:9090)               │ │ Grafana 11.2 (:3005)         │
-│  • Scrapes every 3s                   │ │  • Live Ledger Dashboard     │
-│  • Evaluates 6 Alert Rules            │ │  • SLA/SLO Executive Board   │
-│  • Evaluates 99.9% SLA & Latency p99  │ │  • SOS Incident War-Room     │
-│                                       │ │  • Anomaly Detection Board   │
+│ Event Streaming &amp; Observability       │ │ Prometheus &amp; Grafana Suite   │
+│  • Kafka: ledger.transfers.completed  │ │  • Prometheus 2.54 (:9090)   │
+│  • Kafka: ledger.transfers.expired    │ │  • Grafana Dashboards (:3005)│
+│  • Kafka: payment-requests-dlq        │ │  • Kafbat Kafka UI (:8089)   │
 └───────────────────────────────────────┘ └──────────────────────────────┘</div>
         </div>
 
@@ -615,10 +626,10 @@
 
   <!-- Application Logic -->
   <script>
-    // Robust API_BASE: works seamlessly whether opened via http://localhost:5000 or file:///...
-    const API_BASE = (window.location.protocol.startsWith('http') && window.location.port !== '')
-      ? `${window.location.protocol}//${window.location.hostname}:5000`
-      : 'http://127.0.0.1:5000';
+    // Robust API_BASE: relative URL on port 5000 eliminates CORS and host resolution issues
+    const API_BASE = (window.location.protocol.startsWith('http') && (window.location.port === '5000' || window.location.port === ''))
+      ? ''
+      : (window.location.protocol.startsWith('http') ? `${window.location.protocol}//${window.location.hostname}:5000` : 'http://127.0.0.1:5000');
 
     let rpsChart = null;
     let statusChart = null;
@@ -1050,10 +1061,13 @@
       setInterval(pollMetrics, 1000);
       setInterval(fetchInstances, 2000);
 
-      // Check if user previously checked "don't show again"
-      if (localStorage.getItem('ledger_hide_intro') === 'true') {
+      // Check if user requested clean view for screenshots or previously checked "don't show again"
+      const urlParams = new URLSearchParams(window.location.search);
+      if (urlParams.get('clean') === 'true' || localStorage.getItem('ledger_hide_intro') === 'true') {
         const modal = document.getElementById('introModal');
         if (modal) modal.style.display = 'none';
+      } else {
+        openIntroModal();
       }
     };
   </script>

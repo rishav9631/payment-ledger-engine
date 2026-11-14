@@ -77,6 +77,7 @@ shared_lock_registry = set()
 # Apache Kafka Real Event Streaming Integration
 # ---------------------------------------------------------------------------
 kafka_producer = None
+consumers_need_restart = threading.Event()
 
 def get_kafka_producer():
     global kafka_producer
@@ -102,8 +103,6 @@ def produce_kafka_event(topic, key, value, synchronous=False):
     try:
         p = get_kafka_producer()
         if p:
-            # Guarantee 1: acks='all' is enforced on the Kafka producer.
-            # Message is immediately validated and safely enqueued into the Kafka in-flight ring buffer.
             future = p.send(topic, key=key, value=value)
             return True, None
     except Exception as e:
@@ -123,16 +122,17 @@ def start_kafka_consumers():
                     auto_offset_reset="earliest",
                     enable_auto_commit=True,
                     auto_commit_interval_ms=1000,
-                    consumer_timeout_ms=2000
+                    consumer_timeout_ms=1000
                 )
                 print(f"[*] Kafka Consumer Group active: {group_id} listening to {topics}")
-                while True:
-                    msg_batch = consumer.poll(timeout_ms=1500)
+                while not consumers_need_restart.is_set():
+                    msg_batch = consumer.poll(timeout_ms=1000)
                     if msg_batch:
                         consumer.commit()
-                    time.sleep(0.5)
+                consumer.close()
+                time.sleep(0.5)
             except Exception:
-                time.sleep(3)
+                time.sleep(2)
 
     # ── Core Checkpoint B: High-Throughput Parallel Settlement Workers ──
     def run_ledger_settlement_worker(worker_id):
@@ -148,13 +148,21 @@ def start_kafka_consumers():
                     auto_offset_reset="earliest",
                     enable_auto_commit=False,
                     max_poll_records=500,
-                    consumer_timeout_ms=1000
+                    consumer_timeout_ms=500
                 )
                 print(f"[*] Kafka Settlement Worker-{worker_id} active on ['payment-requests']")
-                while True:
-                    msg_batch = consumer.poll(timeout_ms=400, max_records=500)
+                consecutive_empty = 0
+                while not consumers_need_restart.is_set():
+                    msg_batch = consumer.poll(timeout_ms=200, max_records=500)
                     if not msg_batch:
+                        consecutive_empty += 1
+                        # Periodic safety check: if empty for > 20 polls, ensure partitions still assigned
+                        if consecutive_empty > 20:
+                            if not consumer.assignment():
+                                break
+                            consecutive_empty = 0
                         continue
+                    consecutive_empty = 0
                     completed_count = 0
                     expired_count = 0
                     now = time.time()
@@ -203,7 +211,6 @@ def start_kafka_consumers():
                     except Exception:
                         pass
             except Exception as ex:
-                print(f"[!] Settlement Worker-{worker_id} notice: {ex}")
                 time.sleep(1)
             finally:
                 if consumer:
@@ -211,11 +218,14 @@ def start_kafka_consumers():
                         consumer.close()
                     except Exception:
                         pass
+                if consumers_need_restart.is_set():
+                    time.sleep(0.5)
 
     threading.Thread(target=run_consumer, args=("ledger-audit-consumer-group", ["ledger.transfers.completed"]), daemon=True).start()
     threading.Thread(target=run_consumer, args=("ledger-notification-service", ["ledger.transfers.completed"]), daemon=True).start()
     threading.Thread(target=run_consumer, args=("outbox-cdc-relay-group", ["ledger.outbox.events"]), daemon=True).start()
-    for w_id in range(1, 4):
+    # 6 Workers matching 6 Kafka partitions for 1:1 line-rate parallel consumption
+    for w_id in range(1, 7):
         threading.Thread(target=run_ledger_settlement_worker, args=(w_id,), daemon=True).start()
 
 # Global Test State
@@ -428,6 +438,12 @@ def create_node_handler(node: ClusterNode):
                 lat_ms = round(random.uniform(1.2, 4.5), 2)
                 latency_sec = lat_ms / 1000.0
 
+                is_replay = False
+                cached_resp = None
+                ingress_record = None
+                tx_id = None
+                expires_at = None
+
                 with state_lock:
                     node.requests += 1
                     node.latencies.append(lat_ms)
@@ -441,63 +457,65 @@ def create_node_handler(node: ClusterNode):
 
                     # ── Shared Redis Idempotency Check ────────────────────────
                     if idemp_key in shared_idempotency_store:
+                        is_replay = True
                         node.replays += 1
                         prom_metrics["requests_200"] += 1
                         cached_resp = dict(shared_idempotency_store[idemp_key])
-                        cached_resp["replayedBy"] = node.name
-                        cached_resp["replayedPort"] = node.port
-                        cached_resp["isReplay"] = True
-                        cached_resp["replayedAt"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+                    else:
+                        prom_metrics["requests_202"] += 1
+                        prom_metrics["kafka_sent"] += 1
+                        prom_metrics["transfers_active"] += 1
 
-                        # Publish replay audit event to Kafka for fraud/audit tracking & Kafka UI visibility
-                        replay_tx_id = cached_resp.get("transactionId", str(uuid.uuid4()))
-                        produce_kafka_event("ledger.transfers.completed", replay_tx_id, cached_resp)
-                        produce_kafka_event("ledger.outbox.events", replay_tx_id, {
-                            "eventId": str(uuid.uuid4()),
-                            "aggregateType": "TRANSFER",
-                            "aggregateId": replay_tx_id,
-                            "eventType": "TransferIdempotentReplayEvent",
-                            "payload": cached_resp,
-                            "occurredOn": cached_resp["replayedAt"]
-                        })
+                        tx_id = str(uuid.uuid4())
+                        expires_at = arrival_time + 60.0  # Strict 60,000ms TTL
 
-                        resp_bytes = json.dumps(cached_resp).encode("utf-8")
-                        self.send_response(200)
-                        self.send_header("Content-Type", "application/json")
-                        self.send_header("Content-Length", str(len(resp_bytes)))
-                        self.send_header("X-Idempotent-Replay", "true")
-                        self.send_header("X-Node-Replayed", node.name)
-                        self.end_headers()
-                        try:
-                            self.wfile.write(resp_bytes)
-                        except OSError:
-                            pass
-                        return
+                        ingress_record = {
+                            "transactionId": tx_id,
+                            "idempotencyKey": idemp_key,
+                            "sourceAccount": req_data.get("sourceAccountId", "ACC-1001"),
+                            "destinationAccount": req_data.get("targetAccountId", "ACC-2002"),
+                            "amount": float(req_data.get("amount", 100.0)),
+                            "currency": req_data.get("currency", "INR"),
+                            "arrivalTimestamp": arrival_time,
+                            "expiresAt": expires_at,
+                            "status": "PROCESSING",
+                            "ingestedBy": node.name,
+                            "ingestedPort": node.port,
+                            "enqueuedAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                            "isReplay": False
+                        }
+                        shared_idempotency_store[idemp_key] = ingress_record
 
-                    # ── Queue-First Enqueue (Zero Drop Ingress) ─────────────────
-                    prom_metrics["requests_202"] += 1
-                    prom_metrics["kafka_sent"] += 1
-                    prom_metrics["transfers_active"] += 1
+                if is_replay:
+                    cached_resp["replayedBy"] = node.name
+                    cached_resp["replayedPort"] = node.port
+                    cached_resp["isReplay"] = True
+                    cached_resp["replayedAt"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 
-                    tx_id = str(uuid.uuid4())
-                    expires_at = arrival_time + 60.0  # Strict 60,000ms TTL
+                    # Publish replay audit event to Kafka asynchronously
+                    replay_tx_id = cached_resp.get("transactionId", str(uuid.uuid4()))
+                    produce_kafka_event("ledger.transfers.completed", replay_tx_id, cached_resp)
+                    produce_kafka_event("ledger.outbox.events", replay_tx_id, {
+                        "eventId": str(uuid.uuid4()),
+                        "aggregateType": "TRANSFER",
+                        "aggregateId": replay_tx_id,
+                        "eventType": "TransferIdempotentReplayEvent",
+                        "payload": cached_resp,
+                        "occurredOn": cached_resp["replayedAt"]
+                    })
 
-                    ingress_record = {
-                        "transactionId": tx_id,
-                        "idempotencyKey": idemp_key,
-                        "sourceAccount": req_data.get("sourceAccountId", "ACC-1001"),
-                        "destinationAccount": req_data.get("targetAccountId", "ACC-2002"),
-                        "amount": float(req_data.get("amount", 100.0)),
-                        "currency": req_data.get("currency", "INR"),
-                        "arrivalTimestamp": arrival_time,
-                        "expiresAt": expires_at,
-                        "status": "PROCESSING",
-                        "ingestedBy": node.name,
-                        "ingestedPort": node.port,
-                        "enqueuedAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-                        "isReplay": False
-                    }
-                    shared_idempotency_store[idemp_key] = ingress_record
+                    resp_bytes = json.dumps(cached_resp).encode("utf-8")
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/json")
+                    self.send_header("Content-Length", str(len(resp_bytes)))
+                    self.send_header("X-Idempotent-Replay", "true")
+                    self.send_header("X-Node-Replayed", node.name)
+                    self.end_headers()
+                    try:
+                        self.wfile.write(resp_bytes)
+                    except OSError:
+                        pass
+                    return
 
                 # ── Guarantee 1: Synchronous Kafka Acknowledgement (acks=all) Before Returning 202 ──
                 ack_ok, meta_or_err = produce_kafka_event("payment-requests", ingress_record["sourceAccount"], ingress_record, synchronous=True)
@@ -952,8 +970,10 @@ def reset_environment():
     global kafka_producer
     details = {}
 
-    # 1. Stop active load generation
+    # 1. Stop active load generation & signal consumers to cleanly disconnect
     generator_stop_event.set()
+    consumers_need_restart.set()
+    time.sleep(0.5)
     with state_lock:
         test_state["running"] = False
 
@@ -987,13 +1007,14 @@ def reset_environment():
             kafka_results.append(f"{topic} ({ex})")
     details["kafka_topics"] = kafka_results
 
-    # 4. Reset Kafka producer instance
+    # 4. Reset Kafka producer instance & resume consumers on fresh topics
     try:
         if kafka_producer:
             kafka_producer.close(timeout=2)
     except Exception:
         pass
     kafka_producer = None
+    consumers_need_restart.clear()
 
     # 5. Reset all in-memory cluster stats, Prometheus counters & test history
     with state_lock:

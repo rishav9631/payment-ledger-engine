@@ -27,6 +27,11 @@
 
 ![Queue-First Ingress Workbench](docs/images/queue-ingress-workbench.png)
 
+### 3. Interactive Architecture & SLA Guide Modal
+*Interactive modal detailing the Queue-First Ingress architecture, 3 durability guarantees, strict 1-minute expiration pipeline, and end-to-end data flow:*
+
+![Architecture & SLA Blueprint](docs/images/architecture-sla-modal.png)
+
 ---
 
 ## 🏗️ System Architecture
