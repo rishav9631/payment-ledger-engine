@@ -13,6 +13,14 @@ target/
 
 # === Environment & secrets ===
 .env
+.oci/
+
+# === Oracle Cloud Deployment Scripts ===
+deploy-oci.ps1
+deploy-oci.sh
+deploy.bat
+oci.bat
+*.tar.gz
 
 # === Logs ===
 *.log
