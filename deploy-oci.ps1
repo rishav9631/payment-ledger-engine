@@ -89,7 +89,7 @@ Write-Host "[4/7] Finding latest Ubuntu 24.04 ARM64 image..." -ForegroundColor C
 $ImageId = (& $OciCmd compute image list --compartment-id $TenancyId --operating-system "Canonical Ubuntu" --operating-system-version "24.04" --shape "VM.Standard.A1.Flex" --sort-by TIMECREATED --sort-order DESC --query "data[0].id" --raw-output)
 
 # 7. Provision Always Free ARM VM
-Write-Host "[5/7] Provisioning Always Free VM ($InstanceName: 2 OCPUs, 12 GB RAM)..." -ForegroundColor Cyan
+Write-Host "[5/7] Provisioning Always Free VM ($($InstanceName) - 2 OCPUs, 12 GB RAM)..." -ForegroundColor Cyan
 $InstanceId = (& $OciCmd compute instance list --compartment-id $TenancyId --display-name $InstanceName --lifecycle-state RUNNING --query "data[0].id" --raw-output 2>$null)
 
 if ($InstanceId -and $InstanceId -ne "null") {
