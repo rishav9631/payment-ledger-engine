@@ -125,7 +125,13 @@ Payment UIs typically display a "Processing" state for at most 60 seconds. Trans
 - Explore topics: `payment-requests` (6 partitions), `ledger.transfers.completed`, `ledger.outbox.events`, `payment-requests-dlq`.
 - Live consumer group lag tracking (`ledger-execution-worker-group`, `ledger-audit-consumer-group`, `outbox-cdc-relay-group`).
 
+*Kafka Ingress & Shock Absorber Topics (6 Partitions with 52,000+ messages processed):*
+
 ![Kafbat UI Topic Streams & Partitions](docs/images/kafbat-topics.png)
+
+*Parallel Settlement Consumer Groups (6 active worker instances matching 6 partitions in STABLE state):*
+
+![Kafbat UI Consumer Groups](docs/images/kafbat-consumers.png)
 
 ---
 
